@@ -1,5 +1,5 @@
 """
-ProfitScout MCP Server
+GammaRips MCP Server
 Agent-first options trading intelligence platform
 """
 
@@ -20,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
-mcp = FastMCP(name="profitscout", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
+mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
 # Import authentication middleware (Phase 2)
 # from auth.middleware import auth_middleware
@@ -113,7 +113,7 @@ except Exception as e:
 def main():
     """Run the MCP server."""
     logger.info("========================================")
-    logger.info("ProfitScout MCP Server")
+    logger.info("GammaRips MCP Server")
     logger.info("========================================")
     logger.info("Version: 1.0.0")
     logger.info(f"Project ID: {os.getenv('GCP_PROJECT_ID')}")

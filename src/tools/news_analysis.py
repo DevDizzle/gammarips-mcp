@@ -17,7 +17,7 @@ gcs_client = GCSClient()
 async def get_news_analysis(ticker: str, as_of: str = "latest") -> str:
     """Get news sentiment and catalyst analysis.
 
-    Returns analysis from ProfitScout's news_analyzer pipeline,
+    Returns analysis from GammaRips' news_analyzer pipeline,
     identifying material catalysts and sentiment shifts.
 
     The 'score' field is a sentiment score from 0.0 (Very Bearish) to 1.0 (Very Bullish).

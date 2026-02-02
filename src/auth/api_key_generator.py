@@ -1,5 +1,5 @@
 """
-API Key Generator for ProfitScout TaaS
+API Key Generator for GammaRips TaaS
 Generates secure API keys for user authentication
 """
 

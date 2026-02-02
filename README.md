@@ -1,6 +1,6 @@
-# ProfitScout MCP Server
+# GammaRips MCP Server
 
-ProfitScout is an **Agent-First Options Trading Intelligence Platform** built on the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It provides AI agents with real-time access to high-quality financial data, technical analysis, and options market structure (Vol/OI walls, Gamma exposure).
+GammaRips is an **Agent-First Options Trading Intelligence Platform** built on the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It provides AI agents with real-time access to high-quality financial data, technical analysis, and options market structure (Vol/OI walls, Gamma exposure).
 
 ## Features
 
@@ -13,7 +13,7 @@ ProfitScout is an **Agent-First Options Trading Intelligence Platform** built on
 ## Project Structure
 
 ```
-profitscout-mcp/
+gammarips-mcp/
 ├── docs/               # Documentation, changelogs, and roadmap
 ├── scripts/            # Deployment and debugging scripts
 ├── src/
@@ -37,8 +37,8 @@ profitscout-mcp/
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/yourusername/profitscout-mcp.git
-    cd profitscout-mcp
+    git clone https://github.com/yourusername/gammarips-mcp.git
+    cd gammarips-mcp
     ```
 
 2.  **Create a virtual environment:**

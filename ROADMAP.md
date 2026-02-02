@@ -1,4 +1,4 @@
-# ProfitScout Roadmap
+# GammaRips Roadmap
 
 ## Immediate Next Steps
 - [ ] **API Setup:** Configure `google.generativeai` with valid API keys in the production environment.

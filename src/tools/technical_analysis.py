@@ -17,7 +17,7 @@ gcs_client = GCSClient()
 async def get_technical_analysis(ticker: str, as_of: str = "latest") -> str:
     """Get detailed technical analysis including indicators and patterns.
 
-    Returns comprehensive technical analysis from ProfitScout's
+    Returns comprehensive technical analysis from GammaRips'
     technicals_analyzer pipeline with LLM-generated insights.
 
     Args:

@@ -1,5 +1,5 @@
 """
-BigQuery client for accessing ProfitScout data
+BigQuery client for accessing GammaRips data
 """
 
 import logging
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class BigQueryClient:
-    """Client for querying ProfitScout data from BigQuery."""
+    """Client for querying GammaRips data from BigQuery."""
 
     _client_instance = None
 

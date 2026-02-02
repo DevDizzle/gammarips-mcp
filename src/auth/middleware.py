@@ -1,5 +1,5 @@
 """
-Authentication middleware for ProfitScout MCP Server
+Authentication middleware for GammaRips MCP Server
 Validates API keys and tracks usage for billing
 """
 
@@ -47,7 +47,7 @@ class AuthMiddleware:
         if not self.require_api_key:
             return {
                 "user_id": "anonymous",
-                "email": "anonymous@profitscout.com",
+                "email": "anonymous@gammarips.com",
                 "plan": "free",
                 "subscription_status": "active",
             }
@@ -77,7 +77,7 @@ class AuthMiddleware:
             if user_data.get("subscription_status") != "active":
                 raise ValueError(
                     f"Subscription is {user_data.get('subscription_status')}. "
-                    "Please update your payment information at profitscout.com"
+                    "Please update your payment information at gammarips.com"
                 )
 
             return user_data

@@ -1,4 +1,4 @@
-# The Death of the Login Button: Why We Built ProfitScout for Agents, Not Humans
+# The Death of the Login Button: Why We Built GammaRips for Agents, Not Humans
 
 The Golden Age of SaaS is ending. Not because software is becoming less important, but because the *consumer* of that software is changing.
 
@@ -17,9 +17,9 @@ Your agent doesn't need a React dashboard. It doesn't need a "Dark Mode" toggle.
 
 This isn't SaaS (Software as a Service). This is **TaaS (Tools as a Service)**.
 
-## Case Study: ProfitScout MCP
+## Case Study: GammaRips MCP
 
-We recently refactored **ProfitScout**, our financial intelligence platform, to fully embrace this paradigm using the **Model Context Protocol (MCP)**.
+We recently refactored **GammaRips**, our financial intelligence platform, to fully embrace this paradigm using the **Model Context Protocol (MCP)**.
 
 Instead of building a web app, we built an **MCP Server**.
 Instead of API endpoints for a frontend, we exposed **15+ specialized tools** directly to LLMs:
@@ -29,7 +29,7 @@ Instead of API endpoints for a frontend, we exposed **15+ specialized tools** di
 *   `get_fundamental_analysis`: "How is NVDA's debt-to-equity ratio trending?"
 *   `run_price_query`: "SELECT * FROM prices WHERE volume > 10m..."
 
-We didn't build a single HTML page. Yet, this is the most powerful version of ProfitScout we've ever created. Why? Because an LLM (like Gemini or Claude) can now "use" our entire financial engine to answer complex, multi-step questions that no static dashboard could ever visualize.
+We didn't build a single HTML page. Yet, this is the most powerful version of GammaRips we've ever created. Why? Because an LLM (like Gemini or Claude) can now "use" our entire financial engine to answer complex, multi-step questions that no static dashboard could ever visualize.
 
 ## The "Invisible" SaaS
 
@@ -48,6 +48,6 @@ Can an AI subscribe to your service and use it without a human in the loop? If t
 
 We are moving from a world of **"Login > Click > Export"** to **"Prompt > Reason > Execute."**
 
-ProfitScout is ready. Is your stack?
+GammaRips is ready. Is your stack?
 
 #AI #MCP #ModelContextProtocol #AgenticAI #FinTech #SoftwareArchitecture #TaaS #SaaS #FutureOfWork

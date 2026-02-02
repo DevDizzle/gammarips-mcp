@@ -1,5 +1,5 @@
 """
-Google Cloud Storage client for accessing ProfitScout analysis files
+Google Cloud Storage client for accessing GammaRips analysis files
 """
 
 import json
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class GCSClient:
-    """Client for reading ProfitScout analysis files from Google Cloud Storage."""
+    """Client for reading GammaRips analysis files from Google Cloud Storage."""
 
     _client_instance = None
     _bucket_instance = None

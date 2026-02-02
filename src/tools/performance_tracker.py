@@ -24,7 +24,7 @@ async def get_performance_tracker(
     """Get performance metrics for tracked options signals.
 
     Returns historical performance data for signals that were identified by
-    the ProfitScout system, including entry price, current price, and P&L.
+    the GammaRips system, including entry price, current price, and P&L.
 
     **Note:** These are PAPER signals for demonstration purposes. No actual
     trades are executed. Performance is calculated from signal identification

@@ -1,7 +1,7 @@
-# GammaRips / ProfitScout MCP Integration Roadmap
+# GammaRips / GammaRips MCP Integration Roadmap
 
 ## Objective
-To transform **ProfitScout** from an internal backend service into a dual-purpose product:
+To transform **GammaRips** from an internal backend service into a dual-purpose product:
 1.  **"Headless" TaaS (Tools as a Service):** Allowing paid users to plug our financial data tools directly into their own AI agents (Claude Desktop, Cursor, custom bots).
 2.  **Web Agent:** Powering an on-site chat interface at `gammarips.com`.
 
@@ -12,7 +12,7 @@ To transform **ProfitScout** from an internal backend service into a dual-purpos
 
 ### 1.1 Secure the MCP Server
 **Goal:** Restrict tool access to valid paid subscribers.
-*   **Authentication:** Implement `API Key` validation middleware on the ProfitScout MCP server.
+*   **Authentication:** Implement `API Key` validation middleware on the GammaRips MCP server.
     *   *Mechanism:* Request headers must include `X-API-Key: <sk_user_key>`.
     *   *Validation:* Verify keys against a user database (Firestore/Supabase).
 *   **Rate Limiting:** Protect backend resources (BigQuery costs) by limiting tool calls per minute/day per key.
@@ -39,10 +39,10 @@ To transform **ProfitScout** from an internal backend service into a dual-purpos
 *Target Audience: General Retail Traders.*
 
 ### 2.1 On-Site Chat Interface
-**Goal:** "Chat with ProfitScout" directly in the browser.
+**Goal:** "Chat with GammaRips" directly in the browser.
 *   **Architecture:**
     *   **Frontend:** React/Next.js Chat UI.
-    *   **Middle Layer:** The `gammarips.com` backend acts as the **MCP Host**. It manages the conversation history and calls the ProfitScout MCP server tools on behalf of the user.
+    *   **Middle Layer:** The `gammarips.com` backend acts as the **MCP Host**. It manages the conversation history and calls the GammaRips MCP server tools on behalf of the user.
     *   **Model:** Connects to a fast, reasoning model (e.g., Gemini 2.0 Flash or Claude 3.5 Sonnet).
 *   **UX:** seamless streaming responses with rich formatting (Markdown tables for data).
 
@@ -57,7 +57,7 @@ To transform **ProfitScout** from an internal backend service into a dual-purpos
     *   Code Block display for JSON configs.
     *   Tool List visualization (Name, Description, Parameters).
 
-### Backend (ProfitScout MCP)
+### Backend (GammaRips MCP)
 *   **Auth Middleware:** Verify `X-API-Key` headers.
 *   **CORS Configuration:** Allow requests from local agents (checking origins or strictly enforcing header auth).
 *   **Usage Tracking:** Log tool usage per API key for billing/monitoring.
@@ -72,4 +72,4 @@ To transform **ProfitScout** from an internal backend service into a dual-purpos
 4.  **User** copies the "Claude Desktop Config" snippet.
 5.  **User** pastes snippet into their local computer's config file.
 6.  **User** opens Claude Desktop and asks: *"Check the market winners for today."*
-7.  **Result:** Claude connects to ProfitScout, fetches real-time BigQuery data, and explains the trade setups.
+7.  **Result:** Claude connects to GammaRips, fetches real-time BigQuery data, and explains the trade setups.

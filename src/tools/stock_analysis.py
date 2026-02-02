@@ -23,7 +23,7 @@ async def get_stock_analysis(
 ) -> str:
     """Get comprehensive stock analysis including fundamentals, financials, business, technicals, news, and reports.
 
-    Combines data from multiple ProfitScout analysis pipelines to provide
+    Combines data from multiple GammaRips analysis pipelines to provide
     a complete picture of the stock's current state and outlook.
 
     Available Sections:

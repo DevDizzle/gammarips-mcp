@@ -1,16 +1,16 @@
-# ProfitScout MCP Server - Comprehensive Test & Evaluation Plan
+# GammaRips MCP Server - Comprehensive Test & Evaluation Plan
 
 **Date:** January 13, 2026
 **Status:** Draft
-**Objective:** To implement a robust, automated testing and evaluation framework for the ProfitScout MCP Server, ensuring high-quality financial insights through "LLM-as-a-Judge" validation.
+**Objective:** To implement a robust, automated testing and evaluation framework for the GammaRips MCP Server, ensuring high-quality financial insights through "LLM-as-a-Judge" validation.
 
 ## 1. Executive Summary
-This plan outlines the strategy to test the ProfitScout MCP server's 15+ financial analysis tools. We will move beyond simple unit tests to a **Model-Based Evaluation (MBE)** workflow. This involves generating responses using **Gemini 2.5 Flash Lite** (the "Generator") based on tool outputs, and then evaluating those responses using **Gemini 2.5 Pro** (the "Judge") with reasoning and grounding capabilities.
+This plan outlines the strategy to test the GammaRips MCP server's 15+ financial analysis tools. We will move beyond simple unit tests to a **Model-Based Evaluation (MBE)** workflow. This involves generating responses using **Gemini 2.5 Flash Lite** (the "Generator") based on tool outputs, and then evaluating those responses using **Gemini 2.5 Pro** (the "Judge") with reasoning and grounding capabilities.
 
 ## 2. Test Architecture
 
 ### 2.1 Components
-*   **SUT (System Under Test):** `src/server.py` (ProfitScout MCP Server).
+*   **SUT (System Under Test):** `src/server.py` (GammaRips MCP Server).
 *   **Orchestrator:** A Python-based test runner (`tests/comprehensive_runner.py`) that manages the lifecycle of each test case.
 *   **Generator (The Agent):** **Gemini 2.5 Flash Lite**. It receives the user query and the raw tool output from the MCP server to generate a natural language response.
 *   **Judge (The Evaluator):** **Gemini 2.5 Pro** (Reasoning + Grounded in Google). It evaluates the Generator's response for accuracy, groundedness, and safety.

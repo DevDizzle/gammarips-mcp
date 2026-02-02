@@ -1,4 +1,4 @@
-# ProfitScout MCP Enhancements Tracker
+# GammaRips MCP Enhancements Tracker
 
 ## Architectural Goal
 To transform the MCP server into a robust decision-support system with distinct layers for "Deep Research" (Fundamentals, Financials, Business, News, Technicals) and "Trade Execution" (Winners, Opportunities).
@@ -34,7 +34,7 @@ These tools provide specific domains of data for a single ticker.
 
 6.  **`price_data_sql.py`** (**NEW**)
     *   **Status**: Create.
-    *   **Source**: BigQuery (`profitscout-lx6bb.profit_scout.price_data`).
+    *   **Source**: BigQuery (`gammarips-lx6bb.profit_scout.price_data`).
     *   **Purpose**: Allow the agent to run flexible SQL queries on raw OHLCV data (e.g., "Find volume spikes").
 
 ### Tier 2: Trade Finder Tools (The "Signals")

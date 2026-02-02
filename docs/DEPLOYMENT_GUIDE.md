@@ -1,9 +1,9 @@
-# ProfitScout MCP Server: Deployment Guide
+# GammaRips MCP Server: Deployment Guide
 
 **Date:** January 4, 2026  
 **Author:** Manus AI
 
-This guide walks you through deploying the ProfitScout MCP Server to Google Cloud Run and connecting it to AI agents for testing.
+This guide walks you through deploying the GammaRips MCP Server to Google Cloud Run and connecting it to AI agents for testing.
 
 ---
 
@@ -11,11 +11,11 @@ This guide walks you through deploying the ProfitScout MCP Server to Google Clou
 
 Before you begin, ensure you have the following:
 
-1.  **Google Cloud Platform Account** with an active project (e.g., `profitscout-lx6bb`).
+1.  **Google Cloud Platform Account** with an active project (e.g., `gammarips-lx6bb`).
 2.  **Google Cloud SDK** installed and configured on your local machine.
 3.  **Owner or Editor permissions** in your GCP project.
 4.  **Enabled APIs**: Cloud Run, Cloud Build, Artifact Registry, BigQuery, Cloud Storage, Firestore.
-5.  **Existing ProfitScout data** in BigQuery and Google Cloud Storage.
+5.  **Existing GammaRips data** in BigQuery and Google Cloud Storage.
 
 ---
 
@@ -25,20 +25,20 @@ This phase focuses on deploying the MCP server without authentication, allowing 
 
 ### Step 1: Clone the Repository
 
-If you haven't already, clone the `profitscout-mcp` repository to your local machine:
+If you haven't already, clone the `gammarips-mcp` repository to your local machine:
 
 ```bash
 git clone <repository_url>
-cd profitscout-mcp
+cd gammarips-mcp
 ```
 
 ### Step 2: Configure Environment Variables
 
 The deployment script and Cloud Run service rely on environment variables to connect to your GCP resources. Review the `.env.example` file and ensure the following values are correct:
 
-*   `GCP_PROJECT_ID`: Your GCP project ID (e.g., `profitscout-lx6bb`).
+*   `GCP_PROJECT_ID`: Your GCP project ID (e.g., `gammarips-lx6bb`).
 *   `GCP_REGION`: The region where you want to deploy (e.g., `us-central1`).
-*   `BIGQUERY_DATASET`: The BigQuery dataset containing your ProfitScout tables (e.g., `profit_scout`).
+*   `BIGQUERY_DATASET`: The BigQuery dataset containing your GammaRips tables (e.g., `profit_scout`).
 *   `GCS_BUCKET_NAME`: The GCS bucket containing your analysis files (e.g., `profit-scout-data`).
 
 These values are already set in the `deploy.sh` script, but you can override them by exporting environment variables before running the script.
@@ -54,7 +54,7 @@ gcloud auth login
 Set your active project:
 
 ```bash
-gcloud config set project profitscout-lx6bb
+gcloud config set project gammarips-lx6bb
 ```
 
 ### Step 4: Run the Deployment Script
@@ -75,7 +75,7 @@ Run the script:
 The script will output the service URL upon completion. It should look something like:
 
 ```
-https://profitscout-mcp-abcdefgh-uc.a.run.app
+https://gammarips-mcp-abcdefgh-uc.a.run.app
 ```
 
 **Note**: The service is deployed with `--allow-unauthenticated`, meaning anyone with the URL can access it. This is acceptable for Phase 1 internal testing, but you will need to enable authentication for the public launch in Phase 2.
@@ -86,7 +86,7 @@ You can test the deployed service using the Cloud Run proxy, which creates a sec
 
 1.  **Start the proxy**:
     ```bash
-    gcloud run services proxy profitscout-mcp --region=us-central1
+    gcloud run services proxy gammarips-mcp --region=us-central1
     ```
     This will start a local proxy on `http://127.0.0.1:8080`.
 
@@ -197,7 +197,7 @@ Once the server is deployed and tested, you can connect it to AI agents.
 
 You can view the server logs in the Google Cloud Console:
 
-1.  Navigate to **Cloud Run** > **profitscout-mcp** > **Logs**.
+1.  Navigate to **Cloud Run** > **gammarips-mcp** > **Logs**.
 2.  Filter by severity (INFO, WARNING, ERROR) to troubleshoot issues.
 
 ### Monitoring Usage
@@ -239,11 +239,11 @@ You can grant these roles in the IAM & Admin section of the GCP Console.
 
 ## Next Steps
 
-Congratulations! You have successfully deployed the ProfitScout MCP Server. The next steps are:
+Congratulations! You have successfully deployed the GammaRips MCP Server. The next steps are:
 
 1.  **Build the user registration and billing system** (Phase 2) using Next.js and Firebase.
 2.  **Integrate Stripe** for subscription management.
 3.  **Create public documentation** for users to connect their AI agents.
 4.  **Launch marketing campaigns** to attract users.
 
-Refer to the [TaaS Strategy Document](../ProfitScout_TaaS_Strategy.md) for the full roadmap.
+Refer to the [TaaS Strategy Document](../GammaRips_TaaS_Strategy.md) for the full roadmap.

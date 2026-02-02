@@ -1,6 +1,6 @@
-# ProfitScout MCP Server: Testing Guide
+# GammaRips MCP Server: Testing Guide
 
-This guide provides instructions for testing the ProfitScout MCP server, both locally and after deployment to Cloud Run.
+This guide provides instructions for testing the GammaRips MCP server, both locally and after deployment to Cloud Run.
 
 ---
 
@@ -102,7 +102,7 @@ The `gcloud` CLI provides a secure proxy that forwards a local port to your remo
 
 1.  **Start the proxy**:
     ```bash
-    gcloud run services proxy profitscout-mcp --region=us-central1
+    gcloud run services proxy gammarips-mcp --region=us-central1
     ```
     This will start a proxy on `http://127.0.0.1:8080`.
 
@@ -114,7 +114,7 @@ Once you have enabled API key authentication and deployed the service with `--al
 
 1.  **Get the service URL** from the Cloud Run console or by running:
     ```bash
-    gcloud run services describe profitscout-mcp --region=us-central1 --format=\"value(status.url)\"
+    gcloud run services describe gammarips-mcp --region=us-central1 --format=\"value(status.url)\"
     ```
 
 2.  **Update `test_client.py`** to include the API key in the headers:
