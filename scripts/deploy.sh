@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ProfitScout MCP Server - Cloud Run Deployment Script
+# GammaRips MCP Server - Cloud Run Deployment Script
 # This script builds and deploys the MCP server to Google Cloud Run
 
 set -e  # Exit on error
@@ -30,7 +30,7 @@ if ! gcloud artifacts repositories describe $REPOSITORY_NAME --location=$REGION 
     gcloud artifacts repositories create $REPOSITORY_NAME \
         --repository-format=docker \
         --location=$REGION \
-        --description="ProfitScout MCP Server container images"
+        --description="GammaRips MCP Server container images"
 else
     echo "Artifact Registry repository already exists."
 fi
