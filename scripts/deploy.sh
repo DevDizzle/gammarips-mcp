@@ -57,7 +57,7 @@ gcloud run deploy $SERVICE_NAME \
     --cpu=1 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=$REGION,BIGQUERY_DATASET=profit_scout,GCS_BUCKET_NAME=profit-scout-data,GOOGLE_CSE_ID=${GOOGLE_CSE_ID},GOOGLE_API_KEY=${GOOGLE_API_KEY},REQUIRE_API_KEY=true,FIRESTORE_COLLECTION_USERS=users"
+    --set-env-vars="GCP_PROJECT_ID=profitscout-fida8,GCP_REGION=$REGION,BIGQUERY_DATASET=profit_scout,GCS_BUCKET_NAME=profit-scout-data,GOOGLE_CSE_ID=${GOOGLE_CSE_ID},GOOGLE_API_KEY=${GOOGLE_API_KEY},REQUIRE_API_KEY=true,FIRESTORE_COLLECTION_USERS=users,WINNERS_DASHBOARD_TABLE=profitscout-lx6bb.profit_scout.winners_dashboard,OPTION_CHAINS_TABLE=profitscout-lx6bb.profit_scout.options_chain,PERFORMANCE_TRACKER_TABLE=profitscout-lx6bb.profit_scout.performance_tracker,CALENDAR_EVENTS_TABLE=profitscout-lx6bb.profit_scout.calendar_events"
 
 echo ""
 echo "========================================="
