@@ -52,8 +52,8 @@ async def get_top_picks_analysis(
                 macro_context = {"error": "Failed to retrieve macro context"}
 
         # --- Step 2: Signal Universe ---
-        # Request more than limit to allow for filtering
-        dashboard_json = await get_winners_dashboard(limit=20, option_type=option_type)
+        # Request all daily signals (limit=50 covers typical daily volume of ~35-40)
+        dashboard_json = await get_winners_dashboard(limit=50, option_type=option_type)
         dashboard = json.loads(dashboard_json)
         
         if "signals" not in dashboard:
@@ -86,42 +86,46 @@ async def get_top_picks_analysis(
             if is_quality and is_good_vol:
                 candidates.append(sig)
 
-        # Take top 8 candidates for deep dive to save resources
-        deep_dive_candidates = candidates[:8]
+        # Analyze ALL qualified candidates (no arbitrary limit)
+        deep_dive_candidates = candidates
         
         if not deep_dive_candidates:
             # Fallback: if no "Strong" signals, take top "Medium" ones to provide *something*
             logger.warning("No Strong/Cheap signals found. Falling back to top dashboard results.")
             deep_dive_candidates = all_signals[:5]
 
-        # --- Step 4: Deep Dive (Parallel) ---
+        # --- Step 4: Deep Dive (Parallel with Semaphore) ---
+        # Use semaphore to limit concurrent requests to avoid timeouts/rate limits
+        sem = asyncio.Semaphore(10)
+
         async def analyze_candidate(signal):
-            ticker = signal.get("ticker")
-            if not ticker:
-                return None
+            async with sem:
+                ticker = signal.get("ticker")
+                if not ticker:
+                    return None
 
-            # Run all deep dive tools in parallel
-            results = await asyncio.gather(
-                get_news_analysis(ticker),
-                get_technical_analysis(ticker),
-                analyze_market_structure(ticker),
-                get_market_events(ticker=ticker, days_forward=5),
-                return_exceptions=True
-            )
+                # Run all deep dive tools in parallel
+                results = await asyncio.gather(
+                    get_news_analysis(ticker),
+                    get_technical_analysis(ticker),
+                    analyze_market_structure(ticker),
+                    get_market_events(ticker=ticker, days_forward=5),
+                    return_exceptions=True
+                )
 
-            # Parse results safely
-            news = _parse_result(results[0])
-            technicals = _parse_result(results[1])
-            structure = _parse_result(results[2])
-            events = _parse_result(results[3])
+                # Parse results safely
+                news = _parse_result(results[0])
+                technicals = _parse_result(results[1])
+                structure = _parse_result(results[2])
+                events = _parse_result(results[3])
 
-            return {
-                "signal": signal,
-                "news": news,
-                "technicals": technicals,
-                "structure": structure,
-                "events": events
-            }
+                return {
+                    "signal": signal,
+                    "news": news,
+                    "technicals": technicals,
+                    "structure": structure,
+                    "events": events
+                }
 
         analyzed_candidates = await asyncio.gather(
             *[analyze_candidate(c) for c in deep_dive_candidates]
