@@ -6,7 +6,7 @@
 set -e  # Exit on error
 
 # Configuration
-PROJECT_ID="${GCP_PROJECT_ID:-profitscout-lx6bb}"
+PROJECT_ID="${GCP_PROJECT_ID:-profitscout-fida8}"
 REGION="${GCP_REGION:-us-central1}"
 SERVICE_NAME="gammarips-mcp"
 REPOSITORY_NAME="gammarips-mcp"
