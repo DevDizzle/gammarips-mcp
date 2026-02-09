@@ -131,9 +131,9 @@ class GCSClient:
     async def get_news_analysis(self, ticker: str, as_of: str = "latest") -> dict[str, Any] | None:
         """Get news analysis for a ticker from GCS."""
         if as_of == "latest":
-            blob_path = self._get_latest_file_from_prefix("headline-news/", ticker, ".json")
+            blob_path = self._get_latest_file_from_prefix("news-analysis/", ticker, ".json")
         else:
-            blob_path = f"headline-news/{ticker.upper()}_{as_of}.json"
+            blob_path = f"news-analysis/{ticker.upper()}_{as_of}.json"
 
         if not blob_path:
             return {"ticker": ticker.upper(), "message": "No news analysis found."}
