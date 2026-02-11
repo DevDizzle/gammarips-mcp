@@ -35,7 +35,7 @@ async def get_winners_dashboard(
     Returns:
         JSON string with top signals including ticker, option_type, strike, expiration,
         current_price, setup_quality_signal, stock_price_trend_signal,
-        volatility_comparison_signal, breakeven_price, expected_move, and analysis_summary.
+        volatility_comparison_signal, breakeven_price, expected_move, weighted_score, and analysis_summary.
 
     Example:
         >>> result = await get_winners_dashboard(limit=5, option_type="CALL", min_quality="High")

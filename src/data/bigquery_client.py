@@ -102,9 +102,7 @@ class BigQueryClient:
 
         # Add ordering and limit
         query += """
-        ORDER BY
-            CASE setup_quality_signal WHEN 'High' THEN 3 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 1 ELSE 0 END DESC,
-            CASE volatility_comparison_signal WHEN 'Favorable' THEN 1 ELSE 0 END DESC
+        ORDER BY weighted_score DESC
         LIMIT @limit
         """
         params.append(bigquery.ScalarQueryParameter("limit", "INT64", limit))
