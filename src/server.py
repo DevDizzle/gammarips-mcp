@@ -38,18 +38,17 @@ from tools.fundamental_deep_dive import get_macro_thesis, get_mda_analysis, get_
 from tools.market_events import get_market_events
 from tools.market_structure import analyze_market_structure
 from tools.news_analysis import get_news_analysis
+from tools.overnight_signals import get_market_themes, get_overnight_signals, get_signal_detail, get_top_movers
 from tools.performance_tracker import get_performance_summary, get_performance_tracker
 from tools.price_data_sql import run_price_query
-from tools.stock_analysis import get_stock_analysis
 from tools.technical_analysis import get_technical_analysis
-from tools.top_picks_analysis import get_top_picks_analysis
 from tools.web_search import web_search
-from tools.winners_dashboard import get_winners_dashboard
 
 # Register tools with the MCP server
-mcp.tool()(get_top_picks_analysis)
-mcp.tool()(get_winners_dashboard)
-mcp.tool()(get_stock_analysis)
+mcp.tool()(get_overnight_signals)
+mcp.tool()(get_signal_detail)
+mcp.tool()(get_top_movers)
+mcp.tool()(get_market_themes)
 mcp.tool()(get_macro_thesis)
 mcp.tool()(get_mda_analysis)
 mcp.tool()(get_transcript_analysis)
@@ -71,14 +70,31 @@ def get_tools_list():
     """Return the list of available MCP tools"""
     return [
         {
-            "name": "get_top_picks_analysis",
-            "description": "🎯 RECOMMENDED: Get fully analyzed top options picks with all supporting data. Runs complete analysis playbook: winners dashboard → deep dives (news, technicals, market structure, events) → scoring → formatted picks with entry/exit levels and thesis.",
+            "name": "get_overnight_signals",
+            "description": "Get today's overnight institutional flow signals. Returns tickers where smart money moved overnight, scored by conviction.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "Number of top picks (1-5)", "default": 3},
-                    "include_macro": {"type": "boolean", "description": "Include macro context", "default": True},
-                    "option_type": {"type": "string", "description": "Filter: CALL or PUT"}
+                    "direction": {
+                        "type": "string",
+                        "enum": ["BULLISH", "BEARISH", "ALL"],
+                        "default": "ALL",
+                        "description": "Filter by signal direction"
+                    },
+                    "minScore": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Minimum overnight score (0-10)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Max results to return"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Scan date (YYYY-MM-DD). Defaults to latest available."
+                    }
                 }
             },
             "annotations": {
@@ -89,15 +105,59 @@ def get_tools_list():
             }
         },
         {
-            "name": "get_winners_dashboard",
-            "description": "Get top options signals ranked by conviction. Filter by quality, option type.",
+            "name": "get_signal_detail",
+            "description": "Deep dive on a single ticker's overnight signal. Returns full flow data, technicals, news analysis, and recommended contract.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "Max results to return", "default": 10},
-                    "min_quality": {"type": "string", "description": "Minimum quality filter (High, Medium, Low)"},
-                    "option_type": {"type": "string", "description": "Filter by CALL or PUT"},
-                    "as_of": {"type": "string", "description": "Date (YYYY-MM-DD) or 'latest'", "default": "latest"}
+                    "ticker": {
+                        "type": "string",
+                        "description": "Stock ticker symbol"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Scan date (YYYY-MM-DD). Defaults to latest."
+                    }
+                },
+                "required": ["ticker"]
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_top_movers",
+            "description": "Quick summary of today's highest conviction signals. Perfect for morning briefings and content generation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Number of top movers per direction"
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_market_themes",
+            "description": "AI-generated analysis of tonight's overnight flow themes. What sectors are rotating, what narratives are emerging.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Scan date. Defaults to latest."
+                    }
                 }
             },
             "annotations": {
@@ -127,23 +187,6 @@ def get_tools_list():
             "name": "get_performance_summary",
             "description": "Aggregate stats across all tracked signals.",
             "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_stock_analysis",
-            "description": "Full analysis for a ticker: fundamentals, technicals, news, financials.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                },
-                "required": ["ticker"]
-            },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
@@ -380,9 +423,10 @@ def get_tools_list():
 async def execute_tool(tool_name: str, args: dict, user_info: dict) -> str:
     """Execute a tool by name with provided arguments."""
     tool_map = {
-        "get_top_picks_analysis": get_top_picks_analysis,
-        "get_winners_dashboard": get_winners_dashboard,
-        "get_stock_analysis": get_stock_analysis,
+        "get_overnight_signals": get_overnight_signals,
+        "get_signal_detail": get_signal_detail,
+        "get_top_movers": get_top_movers,
+        "get_market_themes": get_market_themes,
         "get_macro_thesis": get_macro_thesis,
         "get_mda_analysis": get_mda_analysis,
         "get_transcript_analysis": get_transcript_analysis,
@@ -405,7 +449,10 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict) -> str:
         
     func = tool_map[tool_name]
     try:
-        # Most tools accept **kwargs
+        # Inject user_info into kwargs for tools that need it
+        # We pass it as a hidden argument _user_info
+        args["_user_info"] = user_info
+        
         result = await func(**args)
         return result
     except Exception as e:

@@ -43,12 +43,23 @@ class AuthMiddleware:
         Raises:
             ValueError: If API key is invalid or user is not authorized
         """
+        # Determine tier from API key prefix
+        tier = "FREE"
+        if api_key:
+            if api_key.startswith("gr_war_") or api_key.startswith("gr_live_"):
+                tier = "WAR_ROOM"
+            elif api_key.startswith("gr_edge_"):
+                tier = "EDGE"
+            elif api_key.startswith("gr_free_"):
+                tier = "FREE"
+
         # Skip validation if authentication is disabled
         if not self.require_api_key:
             return {
                 "user_id": "anonymous",
                 "email": "anonymous@gammarips.com",
                 "plan": "free",
+                "tier": tier,  # Pass the determined tier even if auth disabled
                 "subscription_status": "active",
             }
 
@@ -71,6 +82,8 @@ class AuthMiddleware:
             user_doc = next(docs, None)
 
             if not user_doc:
+                # If specifically a free key format but not found, maybe allow? 
+                # For now, strict check as per original code.
                 raise ValueError(
                     "Invalid API key. Check your key at https://gammarips.com/account — "
                     "If you don't have an account, subscribe at https://gammarips.com/developers"
@@ -78,6 +91,7 @@ class AuthMiddleware:
 
             user_data = user_doc.to_dict()
             user_data["user_id"] = user_doc.id
+            user_data["tier"] = tier
 
             # Check subscription status (webapp uses isSubscribed boolean)
             is_subscribed = user_data.get("isSubscribed", False)
@@ -98,10 +112,14 @@ class AuthMiddleware:
                 except Exception:
                     pass
 
-            if not is_subscribed and not in_trial:
-                raise ValueError(
+            # If user is supposed to be paid tier but not subscribed/trial, downgrade or block?
+            # Spec says "Free tier acts as a funnel".
+            # If they have a "gr_edge_" key but no sub, maybe we should block or downgrade.
+            # The original code raised ValueError. I will keep that safety.
+            if (tier in ["EDGE", "WAR_ROOM"]) and not is_subscribed and not in_trial:
+                 raise ValueError(
                     "Subscription required. Your trial has expired or subscription is inactive. "
-                    "Reactivate at https://gammarips.com/account — $19/mo for full API access."
+                    "Reactivate at https://gammarips.com/account — $49/mo for full API access."
                 )
 
             return user_data

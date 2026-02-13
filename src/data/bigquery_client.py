@@ -132,6 +132,168 @@ class BigQueryClient:
             logger.error(f"Error querying winners dashboard: {e}")
             raise
 
+    async def get_overnight_signals(
+        self,
+        date: str = "latest",
+        direction: str = "ALL",
+        min_score: int = 5,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Get overnight signals from BigQuery."""
+        table_name = os.getenv("OVERNIGHT_SIGNALS_TABLE", "overnight_signals_enriched")
+        table_id = self._get_table_id(table_name)
+
+        if date == "latest":
+            run_date = self._get_latest_run_date(table_name, date_col="scan_date")
+        else:
+            run_date = date
+
+        query = f"""
+        SELECT *
+        FROM `{table_id}`
+        WHERE scan_date = CAST(@run_date AS DATE)
+        """
+
+        params = [bigquery.ScalarQueryParameter("run_date", "STRING", run_date)]
+
+        if direction != "ALL":
+            query += " AND direction = @direction"
+            params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
+
+        if min_score > 0:
+            query += " AND overnight_score >= @min_score"
+            params.append(bigquery.ScalarQueryParameter("min_score", "INT64", min_score))
+
+        query += " ORDER BY overnight_score DESC LIMIT @limit"
+        params.append(bigquery.ScalarQueryParameter("limit", "INT64", limit))
+
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+
+        try:
+            query_job = self.client.query(query, job_config=job_config)
+            results = query_job.result()
+            
+            signals = []
+            for row in results:
+                sig = dict(row.items())
+                # Serialize dates
+                for key, value in sig.items():
+                    if hasattr(value, "isoformat"):
+                        sig[key] = value.isoformat()
+                signals.append(sig)
+
+            return {
+                "scan_date": run_date,
+                "total_signals": len(signals),
+                "signals": signals,
+            }
+        except Exception as e:
+            logger.error(f"Error querying overnight signals: {e}")
+            raise
+
+    async def get_signal_detail(self, ticker: str, date: str = "latest") -> dict[str, Any] | None:
+        """Get detailed signal for a ticker."""
+        table_name = os.getenv("OVERNIGHT_SIGNALS_TABLE", "overnight_signals_enriched")
+        table_id = self._get_table_id(table_name)
+
+        if date == "latest":
+            run_date = self._get_latest_run_date(table_name, date_col="scan_date")
+        else:
+            run_date = date
+
+        query = f"""
+        SELECT *
+        FROM `{table_id}`
+        WHERE scan_date = CAST(@run_date AS DATE) AND ticker = @ticker
+        LIMIT 1
+        """
+
+        params = [
+            bigquery.ScalarQueryParameter("run_date", "STRING", run_date),
+            bigquery.ScalarQueryParameter("ticker", "STRING", ticker.upper()),
+        ]
+
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+
+        try:
+            query_job = self.client.query(query, job_config=job_config)
+            results = list(query_job.result())
+            
+            if not results:
+                return None
+                
+            sig = dict(results[0].items())
+            # Serialize
+            for key, value in sig.items():
+                if hasattr(value, "isoformat"):
+                    sig[key] = value.isoformat()
+            
+            return sig
+        except Exception as e:
+            logger.error(f"Error getting signal detail for {ticker}: {e}")
+            raise
+
+    async def get_top_movers(self, count: int = 5) -> dict[str, Any]:
+        """Get top bullish and bearish movers."""
+        table_name = os.getenv("OVERNIGHT_SIGNALS_TABLE", "overnight_signals_enriched")
+        table_id = self._get_table_id(table_name)
+        run_date = self._get_latest_run_date(table_name, date_col="scan_date")
+
+        # Get Bullish
+        bull_query = f"""
+        SELECT ticker, overnight_score, price_change_pct, key_signals, catalyst_summary
+        FROM `{table_id}`
+        WHERE scan_date = CAST(@run_date AS DATE) AND direction = 'BULLISH'
+        ORDER BY overnight_score DESC, price_change_pct DESC
+        LIMIT @count
+        """
+        
+        # Get Bearish
+        bear_query = f"""
+        SELECT ticker, overnight_score, price_change_pct, key_signals, catalyst_summary
+        FROM `{table_id}`
+        WHERE scan_date = CAST(@run_date AS DATE) AND direction = 'BEARISH'
+        ORDER BY overnight_score DESC, price_change_pct ASC
+        LIMIT @count
+        """
+
+        params = [
+            bigquery.ScalarQueryParameter("run_date", "STRING", run_date),
+            bigquery.ScalarQueryParameter("count", "INT64", count),
+        ]
+        
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+
+        try:
+            bull_job = self.client.query(bull_query, job_config=job_config)
+            bear_job = self.client.query(bear_query, job_config=job_config)
+            
+            bullish = [dict(r.items()) for r in bull_job.result()]
+            bearish = [dict(r.items()) for r in bear_job.result()]
+            
+            return {
+                "scan_date": run_date,
+                "summary": {
+                    "bullish_count": len(bullish),
+                    "bearish_count": len(bearish)
+                },
+                "top_bullish": bullish,
+                "top_bearish": bearish
+            }
+        except Exception as e:
+            logger.error(f"Error querying top movers: {e}")
+            raise
+
+    async def get_market_themes(self, date: str = "latest") -> dict[str, Any]:
+        """Get market themes (stub using signals aggregation for now)."""
+        # In a real implementation, this would query a themes table or aggregate signals
+        # For now, let's just return a placeholder or aggregate signals by sector if available
+        return {
+            "scan_date": date, 
+            "themes": []
+        }
+
+
     async def get_market_structure(self, ticker: str, as_of: str = "latest") -> dict[str, Any]:
         """Get market structure (Option Flow & Positioning) for a ticker.
 

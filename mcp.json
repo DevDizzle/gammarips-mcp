@@ -1,0 +1,17 @@
+{
+  "name": "GammaRips Overnight Edge",
+  "description": "Institutional overnight options flow scanner. Query pre-market signals, flow data, technicals, and AI-analyzed catalysts for 5,000+ tickers.",
+  "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
+  "auth": {
+    "type": "api_key",
+    "header": "X-API-Key"
+  },
+  "tools": [
+    "getOvernightSignals",
+    "getSignalDetail", 
+    "getTopMovers",
+    "getMarketThemes",
+    "chat"
+  ],
+  "tags": ["options", "institutional-flow", "overnight", "pre-market", "signals", "AI"]
+}
