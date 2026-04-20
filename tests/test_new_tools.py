@@ -38,8 +38,8 @@ def test_get_support_policy_unknown_topic():
 def test_web_search_success(mock_getenv, mock_build):
     """Test successful web search with mocked API."""
     # Setup mock env vars
-    mock_getenv.side_effect = (
-        lambda k: "fake_key" if k in ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] else None
+    mock_getenv.side_effect = lambda k: (
+        "fake_key" if k in ["GOOGLE_API_KEY", "GOOGLE_CSE_ID"] else None
     )
 
     # Setup mock API response
