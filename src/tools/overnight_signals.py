@@ -4,167 +4,356 @@ Overnight Edge tools for GammaRips MCP
 
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
-
-from data.bigquery_client import BigQueryClient
-from data.firestore_client import FirestoreClient
+from google.cloud import bigquery, firestore
 
 logger = logging.getLogger(__name__)
 
 # Initialize clients
-bq_client = BigQueryClient()
-fs_client = FirestoreClient()
+try:
+    client = bigquery.Client(project="profitscout-fida8")
+except Exception as e:
+    logger.error(f"Failed to initialize BigQuery client: {e}")
+    client = None
 
-def _get_user_tier(kwargs: Dict[str, Any]) -> str:
-    """Extract user tier from injected user_info."""
-    user_info = kwargs.get("_user_info", {})
-    return user_info.get("tier", "FREE")
+try:
+    fs_client = firestore.Client(project="profitscout-fida8")
+except Exception as e:
+    logger.error(f"Failed to initialize Firestore client: {e}")
+    fs_client = None
 
-async def get_overnight_signals(
-    direction: str = "ALL",
-    min_score: int = 5,
-    limit: int = 20,
-    date: str = "latest",
-    **kwargs
+def get_overnight_signals(
+    scan_date: Optional[str] = None,
+    direction: Optional[str] = None,
+    min_score: int = 0,
+    ticker: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Returns raw overnight scanner signals for a given date.
+    """
+    if not client:
+        return [{"error": "BigQuery client not initialized"}]
+
+    try:
+        # Determine scan_date if not provided
+        if not scan_date:
+            query = "SELECT MAX(scan_date) as max_date FROM `profitscout-fida8.profit_scout.overnight_signals`"
+            query_job = client.query(query)
+            results = query_job.result()
+            for row in results:
+                scan_date = str(row.max_date) if row.max_date else None
+                break
+        
+        if not scan_date:
+            return [{"error": "No data found in overnight_signals table"}]
+
+        # Build query
+        # Mapping fields to expected output
+        base_query = """
+            SELECT 
+                ticker, 
+                direction, 
+                overnight_score as score, 
+                day_volume as volume, 
+                total_options_dollar_volume as premium, 
+                recommended_expiration as expiration, 
+                recommended_strike as strike, 
+                scan_date 
+            FROM `profitscout-fida8.profit_scout.overnight_signals`
+            WHERE scan_date = @scan_date
+        """
+        
+        query_params = [
+            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
+        ]
+        
+        if direction:
+            base_query += " AND LOWER(direction) = LOWER(@direction)"
+            query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
+            
+        if min_score > 0:
+            base_query += " AND overnight_score >= @min_score"
+            query_params.append(bigquery.ScalarQueryParameter("min_score", "INTEGER", min_score))
+            
+        if ticker:
+            base_query += " AND ticker = @ticker"
+            query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
+            
+        base_query += " ORDER BY overnight_score DESC LIMIT @limit"
+        query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
+        
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(base_query, job_config=job_config)
+        
+        results = []
+        for row in query_job.result():
+            results.append(dict(row))
+            
+        # Convert date objects to strings for JSON serialization
+        for r in results:
+            if 'scan_date' in r and r['scan_date']:
+                r['scan_date'] = str(r['scan_date'])
+            if 'expiration' in r and r['expiration']:
+                r['expiration'] = str(r['expiration'])
+                
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in get_overnight_signals: {e}")
+        return [{"error": str(e)}]
+
+def get_enriched_signals(
+    scan_date: Optional[str] = None,
+    direction: Optional[str] = None,
+    ticker: Optional[str] = None,
+    limit: int = 25
+) -> List[Dict[str, Any]]:
+    """
+    Returns AI-enriched overnight signals for a scan_date (news, technicals,
+    catalyst analysis, contract recommendation).
+
+    Under V5.3, enrichment already gates on `overnight_score >= 1`, spread <= 10%,
+    and directional UOA > $500K. This tool returns ALL rows that cleared that gate
+    — not a further score filter. The final single tradeable pick is produced by
+    signal-notifier (V/OI > 2, 5-15% OTM, VIX <= VIX3M, LIMIT 1) and surfaced via
+    `get_todays_pick`.
+    """
+    if not client:
+        return [{"error": "BigQuery client not initialized"}]
+
+    try:
+        # Determine scan_date if not provided
+        if not scan_date:
+            query = "SELECT MAX(scan_date) as max_date FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`"
+            query_job = client.query(query)
+            results = query_job.result()
+            for row in results:
+                scan_date = str(row.max_date) if row.max_date else None
+                break
+        
+        if not scan_date:
+            return [{"error": "No data found in overnight_signals_enriched table"}]
+
+        # Build query
+        base_query = """
+            SELECT * 
+            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            WHERE scan_date = @scan_date
+        """
+        
+        query_params = [
+            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
+        ]
+        
+        if direction:
+            base_query += " AND LOWER(direction) = LOWER(@direction)"
+            query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
+            
+        if ticker:
+            base_query += " AND ticker = @ticker"
+            query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
+            
+        base_query += " ORDER BY overnight_score DESC LIMIT @limit"
+        query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
+        
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(base_query, job_config=job_config)
+        
+        results = []
+        for row in query_job.result():
+            results.append(dict(row))
+            
+        # Convert date/datetime objects to strings
+        for r in results:
+            for k, v in r.items():
+                if hasattr(v, 'isoformat'):
+                    r[k] = v.isoformat()
+                elif hasattr(v, 'strftime'):
+                    r[k] = str(v)
+                
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in get_enriched_signals: {e}")
+        return [{"error": str(e)}]
+
+def get_signal_detail(
+    ticker: str,
+    scan_date: Optional[str] = None
 ) -> Dict[str, Any]:
-    """
-    Get today's overnight institutional flow signals.
-    """
-    tier = _get_user_tier(kwargs)
-    
-    # Tier restrictions
-    if tier == "FREE":
-        min_score = max(min_score, 7)
-        limit = min(limit, 10)
-    
-    # Try Firestore first (faster)
-    # Convert "latest" to today's date or handle in client
-    query_date = date
-    if query_date == "latest":
-        query_date = datetime.now().strftime("%Y-%m-%d")
-        
-    signals = await fs_client.get_overnight_signals(
-        date=query_date,
-        direction=direction,
-        min_score=min_score,
-        limit=limit
-    )
-    
-    # Fallback to BigQuery if empty
-    if not signals:
-        logger.info(f"No signals in Firestore for {query_date}, trying BigQuery")
-        bq_res = await bq_client.get_overnight_signals(
-            date=date,
-            direction=direction,
-            min_score=min_score,
-            limit=limit
-        )
-        signals = bq_res.get("signals", [])
-        query_date = bq_res.get("scan_date", query_date)
-
-    # Filter fields for Free tier
-    if tier == "FREE":
-        filtered_signals = []
-        for sig in signals:
-            # Create a copy to avoid modifying cached data if any
-            s = sig.copy()
-            # Remove paid fields
-            for field in [
-                "recommended_contract", "recommended_strike", "recommended_expiration", 
-                "recommended_mid_price", "contract_score", "technicals", "news", 
-                "catalyst_summary", "flow_details"
-            ]:
-                s.pop(field, None)
-            filtered_signals.append(s)
-        signals = filtered_signals
-
-    response = {
-        "scan_date": query_date,
-        "total_signals": len(signals),
-        "signals": signals
-    }
-
-    # Add upgrade prompt for Free tier
-    if tier == "FREE":
-        response["upgrade"] = {
-            "message": f"You're seeing {len(signals)} signals (score 7+ only). Unlock all signals, contracts, technicals & AI analysis.",
-            "plans": [
-                {"name": "The Overnight Edge", "price": "$49/mo", "url": "https://gammarips.com/#pricing"},
-                {"name": "The War Room", "price": "$149/mo", "url": "https://gammarips.com/#pricing"}
-            ]
-        }
-        
-    return response
-
-async def get_signal_detail(ticker: str, date: str = "latest", **kwargs) -> Dict[str, Any]:
     """
     Deep dive on a single ticker's overnight signal.
     """
-    tier = _get_user_tier(kwargs)
-    
-    if tier == "FREE":
-        return {
-            "error": "upgrade_required",
-            "message": "Signal deep dives require The Overnight Edge ($49/mo)",
-            "url": "https://gammarips.com/#pricing"
-        }
-        
-    # Try Firestore
-    query_date = date
-    if query_date == "latest":
-        query_date = datetime.now().strftime("%Y-%m-%d")
+    if not client:
+        return {"error": "BigQuery client not initialized"}
 
-    signal = await fs_client.get_signal_detail(ticker, query_date)
-    
-    # Fallback BQ
-    if not signal:
-        signal = await bq_client.get_signal_detail(ticker, date)
+    try:
+        # Determine scan_date if not provided
+        if not scan_date:
+            # First try to find the latest date for this specific ticker
+            query = """
+                SELECT MAX(scan_date) as max_date 
+                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+                WHERE ticker = @ticker
+            """
+            job_config = bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("ticker", "STRING", ticker)
+            ])
+            query_job = client.query(query, job_config=job_config)
+            results = query_job.result()
+            for row in results:
+                scan_date = str(row.max_date) if row.max_date else None
+                break
         
-    if not signal:
-        return {"error": "Signal not found", "ticker": ticker}
-        
-    return signal
+        if not scan_date:
+            return {"error": f"No signal found for ticker {ticker}"}
 
-async def get_top_movers(count: int = 5, **kwargs) -> Dict[str, Any]:
-    """
-    Quick summary of today's highest conviction signals.
-    """
-    # Available to all tiers
-    
-    # Use BigQuery for aggregation/sorting efficiency as Firestore simple query might not do complex top N per group easily without multiple queries
-    # But BQ is fine here.
-    return await bq_client.get_top_movers(count=count)
+        # Build query
+        query = """
+            SELECT * 
+            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            WHERE ticker = @ticker AND scan_date = @scan_date
+            LIMIT 1
+        """
+        
+        query_params = [
+            bigquery.ScalarQueryParameter("ticker", "STRING", ticker),
+            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
+        ]
+        
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+        query_job = client.query(query, job_config=job_config)
+        
+        results = []
+        for row in query_job.result():
+            results.append(dict(row))
+            
+        if not results:
+            return {"error": f"Signal not found for {ticker} on {scan_date}"}
+            
+        result = results[0]
+        
+        # Convert date/datetime objects to strings
+        for k, v in result.items():
+            if hasattr(v, 'isoformat'):
+                result[k] = v.isoformat()
+            elif hasattr(v, 'strftime'):
+                result[k] = str(v)
+                
+        return result
 
-async def get_market_themes(date: str = "latest", **kwargs) -> Dict[str, Any]:
+    except Exception as e:
+        logger.error(f"Error in get_signal_detail: {e}")
+        return {"error": str(e)}
+
+
+def get_todays_pick(
+    scan_date: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    AI-generated analysis of tonight's overnight flow themes.
+    Returns GammaRips' canonical daily V5.3 pick from Firestore todays_pick/{scan_date}.
+
+    This is the single source of truth for "what did GammaRips pick today" —
+    written atomically by signal-notifier at ~09:00 ET. The same ticker appears
+    on the webapp banner, in the operator email, and (once Phase 2 ships) in the
+    WhatsApp push to paid subscribers. Do NOT re-filter the result — the doc IS
+    the answer.
+
+    Args:
+        scan_date: Filter by date (YYYY-MM-DD). Defaults to most recent.
+
+    Returns:
+        {has_pick: bool, ticker?, direction?, recommended_contract?, recommended_strike?,
+         recommended_expiration?, recommended_mid_price?, recommended_dte?,
+         overnight_score?, vol_oi_ratio?, moneyness_pct?, call_dollar_volume?,
+         put_dollar_volume?, vix3m_at_enrich?, vix_now_at_decision?,
+         decided_at, effective_at, scan_date, policy_version, skip_reason?}
+
+        When has_pick=false, skip_reason explains why: "no_candidates_passed_gates",
+        "regime_fail_closed", or "vix_backwardation".
     """
-    tier = _get_user_tier(kwargs)
-    
-    # Try Firestore
-    query_date = date
-    if query_date == "latest":
-        query_date = datetime.now().strftime("%Y-%m-%d")
-        
-    themes = await fs_client.get_market_themes(query_date)
-    
-    # Fallback BQ (Stub)
-    if not themes:
-        bq_res = await bq_client.get_market_themes(date)
-        themes = bq_res.get("themes", [])
-        query_date = bq_res.get("scan_date", query_date)
-        
-    # Free tier restrictions
-    if tier == "FREE":
-        filtered_themes = []
-        for theme in themes:
-            t = theme.copy()
-            # Remove ticker lists
-            t.pop("tickers", None)
-            filtered_themes.append(t)
-        themes = filtered_themes
-        
-    return {
-        "scan_date": query_date,
-        "themes": themes
-    }
+    if not fs_client:
+        return {"error": "Firestore client not initialized"}
+
+    try:
+        col = fs_client.collection("todays_pick")
+        if scan_date:
+            snap = col.document(scan_date).get()
+            if not snap.exists:
+                return {"error": f"No todays_pick doc for {scan_date}"}
+            data = snap.to_dict()
+        else:
+            # Most recent doc by scan_date DESC.
+            q = col.order_by("scan_date", direction=firestore.Query.DESCENDING).limit(1)
+            docs = list(q.stream())
+            if not docs:
+                return {"error": "No todays_pick docs found"}
+            data = docs[0].to_dict()
+
+        # Normalize Firestore Timestamp -> ISO8601 for JSON serialization.
+        for k, v in list(data.items()):
+            if hasattr(v, "isoformat"):
+                data[k] = v.isoformat()
+
+        return data
+
+    except Exception as e:
+        logger.error(f"Error in get_todays_pick: {e}")
+        return {"error": str(e)}
+
+
+def get_freemium_preview(
+    limit: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Top N enriched signals for the most recent scan, with minimal fields. Used
+    for public/freemium teasers: ticker, direction, score, headline, directional
+    UOA dollar volume. No contract specifics or full thesis — chat agents should
+    use get_signal_detail for that.
+
+    Args:
+        limit: How many preview rows to return (default 5, max 20).
+
+    Returns:
+        List of {ticker, direction, overnight_score, call_dollar_volume,
+                 put_dollar_volume, key_headline, scan_date}.
+    """
+    if not client:
+        return [{"error": "BigQuery client not initialized"}]
+
+    limit = max(1, min(int(limit), 20))
+
+    try:
+        query = """
+            WITH latest AS (
+                SELECT MAX(scan_date) as d
+                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            )
+            SELECT
+                ticker, direction, overnight_score,
+                call_dollar_volume, put_dollar_volume,
+                key_headline, scan_date
+            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            WHERE scan_date = (SELECT d FROM latest)
+            ORDER BY overnight_score DESC,
+                     GREATEST(IFNULL(call_dollar_volume, 0), IFNULL(put_dollar_volume, 0)) DESC
+            LIMIT @limit
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("limit", "INTEGER", limit)]
+        )
+        query_job = client.query(query, job_config=job_config)
+
+        results = []
+        for row in query_job.result():
+            r = dict(row)
+            if r.get("scan_date"):
+                r["scan_date"] = str(r["scan_date"])
+            results.append(r)
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in get_freemium_preview: {e}")
+        return [{"error": str(e)}]

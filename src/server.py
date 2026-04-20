@@ -6,9 +6,15 @@ Agent-first options trading intelligence platform
 import json
 import logging
 import os
+import time
+import inspect
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # Load environment variables
 load_dotenv()
@@ -23,47 +29,39 @@ logger = logging.getLogger(__name__)
 # Initialize FastMCP server
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
-# Import authentication middleware (Phase 2)
-from auth.middleware import auth_middleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-
 # Import tools
-from tools.business_summary import get_business_summary
-from tools.customer_service import get_support_policy
-from tools.financial_analysis import get_financial_analysis
-from tools.fundamental_analysis import get_fundamental_analysis
-from tools.fundamental_deep_dive import get_macro_thesis, get_mda_analysis, get_transcript_analysis
-from tools.market_events import get_market_events
-from tools.market_structure import analyze_market_structure
-from tools.news_analysis import get_news_analysis
-from tools.overnight_signals import get_market_themes, get_overnight_signals, get_signal_detail, get_top_movers
-from tools.performance_tracker import get_performance_summary, get_performance_tracker
-from tools.price_data_sql import run_price_query
-from tools.technical_analysis import get_technical_analysis
+from tools.overnight_signals import (
+    get_overnight_signals,
+    get_enriched_signals,
+    get_signal_detail,
+    get_todays_pick,
+    get_freemium_preview,
+)
+from tools.performance_tracker import (
+    get_signal_performance,
+    get_win_rate_summary,
+    get_open_position,
+    get_position_history,
+)
+from tools.reports import get_daily_report, get_report_list
+from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.web_search import web_search
 
 # Register tools with the MCP server
 mcp.tool()(get_overnight_signals)
+mcp.tool()(get_enriched_signals)
 mcp.tool()(get_signal_detail)
-mcp.tool()(get_top_movers)
-mcp.tool()(get_market_themes)
-mcp.tool()(get_macro_thesis)
-mcp.tool()(get_mda_analysis)
-mcp.tool()(get_transcript_analysis)
-mcp.tool()(analyze_market_structure)
-mcp.tool()(get_technical_analysis)
-mcp.tool()(get_news_analysis)
-mcp.tool()(get_business_summary)
-mcp.tool()(get_fundamental_analysis)
-mcp.tool()(get_financial_analysis)
-mcp.tool()(run_price_query)
-mcp.tool()(get_market_events)
+mcp.tool()(get_todays_pick)
+mcp.tool()(get_freemium_preview)
+mcp.tool()(get_signal_performance)
+mcp.tool()(get_win_rate_summary)
+mcp.tool()(get_open_position)
+mcp.tool()(get_position_history)
+mcp.tool()(get_daily_report)
+mcp.tool()(get_report_list)
+mcp.tool()(get_available_dates)
+mcp.tool()(get_enriched_signal_schema)
 mcp.tool()(web_search)
-mcp.tool()(get_support_policy)
-mcp.tool()(get_performance_tracker)
-mcp.tool()(get_performance_summary)
 
 
 def get_tools_list():
@@ -71,29 +69,64 @@ def get_tools_list():
     return [
         {
             "name": "get_overnight_signals",
-            "description": "Get today's overnight institutional flow signals. Returns tickers where smart money moved overnight, scored by conviction.",
+            "description": "Returns raw overnight scanner signals for a given date. Use this to find tickers where smart money moved overnight.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "scan_date": {
+                        "type": "string",
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date."
+                    },
                     "direction": {
                         "type": "string",
-                        "enum": ["BULLISH", "BEARISH", "ALL"],
-                        "default": "ALL",
-                        "description": "Filter by signal direction"
+                        "enum": ["bull", "bear"],
+                        "description": "Filter by direction"
                     },
-                    "minScore": {
+                    "min_score": {
                         "type": "integer",
-                        "default": 5,
-                        "description": "Minimum overnight score (0-10)"
+                        "description": "Minimum conviction score (1-10)"
+                    },
+                    "ticker": {
+                        "type": "string",
+                        "description": "Filter by specific ticker symbol"
                     },
                     "limit": {
                         "type": "integer",
-                        "default": 20,
+                        "default": 50,
                         "description": "Max results to return"
-                    },
-                    "date": {
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_enriched_signals",
+            "description": "Returns AI-enriched overnight signals for a scan_date (news, technicals, catalyst, recommended contract). V5.3 enrichment gate is `overnight_score >= 1`, spread <= 10%, directional UOA > $500K. This tool returns all rows cleared by that gate — the single daily tradeable pick comes from `get_todays_pick`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scan_date": {
                         "type": "string",
-                        "description": "Scan date (YYYY-MM-DD). Defaults to latest available."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date."
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["bull", "bear"],
+                        "description": "Filter by direction"
+                    },
+                    "ticker": {
+                        "type": "string",
+                        "description": "Filter by specific ticker symbol"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 25,
+                        "description": "Max results to return"
                     }
                 }
             },
@@ -106,17 +139,17 @@ def get_tools_list():
         },
         {
             "name": "get_signal_detail",
-            "description": "Deep dive on a single ticker's overnight signal. Returns full flow data, technicals, news analysis, and recommended contract.",
+            "description": "Deep dive on a single ticker's overnight signal. Returns full enriched signal data including recommended contract.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "ticker": {
                         "type": "string",
-                        "description": "Stock ticker symbol"
+                        "description": "The ticker symbol"
                     },
-                    "date": {
+                    "scan_date": {
                         "type": "string",
-                        "description": "Scan date (YYYY-MM-DD). Defaults to latest."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
                     }
                 },
                 "required": ["ticker"]
@@ -129,15 +162,145 @@ def get_tools_list():
             }
         },
         {
-            "name": "get_top_movers",
-            "description": "Quick summary of today's highest conviction signals. Perfect for morning briefings and content generation.",
+            "name": "get_signal_performance",
+            "description": "Track how signals actually performed against market outcomes.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "count": {
+                    "scan_date": {
+                        "type": "string",
+                        "description": "Filter by date (YYYY-MM-DD)"
+                    },
+                    "ticker": {
+                        "type": "string",
+                        "description": "Filter to specific ticker"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["bull", "bear"],
+                        "description": "Filter by direction"
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["win", "loss"],
+                        "description": "Filter by outcome"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max results"
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_win_rate_summary",
+            "description": "Aggregate performance statistics (win rate, average return).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback period in days"
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_daily_report",
+            "description": "Returns the full daily intelligence report (markdown content).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_report_list",
+            "description": "List available reports.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Number of reports to return"
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_available_dates",
+            "description": "Returns which scan dates have data available.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_todays_pick",
+            "description": "Returns GammaRips' canonical daily V5.3 pick from Firestore todays_pick/{scan_date}. This is the single source of truth for 'what did GammaRips pick today' — do NOT re-filter. Returns {has_pick, ticker, direction, recommended_contract, recommended_strike, vol_oi_ratio, moneyness_pct, vix3m_at_enrich, effective_at, policy_version, skip_reason?}. When has_pick=false, skip_reason explains why (no_candidates_passed_gates | regime_fail_closed | vix_backwardation).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "scan_date": {
+                        "type": "string",
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_freemium_preview",
+            "description": "Top N enriched signals for the most recent scan with minimal fields (ticker, direction, score, directional UOA, headline). For public/freemium teasers; chat agents should use get_signal_detail for contract/thesis depth.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
                         "type": "integer",
                         "default": 5,
-                        "description": "Number of top movers per direction"
+                        "description": "Number of preview rows (clamped 1-20)"
                     }
                 }
             },
@@ -149,299 +312,103 @@ def get_tools_list():
             }
         },
         {
-            "name": "get_market_themes",
-            "description": "AI-generated analysis of tonight's overnight flow themes. What sectors are rotating, what narratives are emerging.",
+            "name": "get_open_position",
+            "description": "Returns currently-open V5.3 paper positions from forward_paper_ledger with live Polygon option prices and unrealized P&L. Use this to answer 'am I in a trade right now?' and 'what's it worth?' questions. Returns a list — possibly empty if no position is open. Fields: ticker, direction, recommended_contract, entry_price, target_price, stop_price, current_mid, unrealized_return_pct, days_since_entry, scan_date.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": True
+            }
+        },
+        {
+            "name": "get_position_history",
+            "description": "Returns realized (closed) V5.3 paper trades from the last N days, row-level, for chat-agent answers like 'show me recent wins/losses'. PIT-safe: only rows where exit_timestamp IS NOT NULL and DATE(exit_timestamp) < today.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "date": {
+                    "days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback window in days"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Max rows (clamped 1-200)"
+                    }
+                }
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "get_enriched_signal_schema",
+            "description": "Returns the BigQuery column schema of overnight_signals_enriched. Chat agents use this to introspect available fields before asking 'why this pick?' without hallucinating field names.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False
+            }
+        },
+        {
+            "name": "web_search",
+            "description": "Search the web for real-time info or to verify facts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {
                         "type": "string",
-                        "description": "Scan date. Defaults to latest."
+                        "description": "Search query"
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Number of results to return"
                     }
-                }
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_performance_tracker",
-            "description": "Track historical signal performance with win rate and P&L.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "days": {"type": "integer", "description": "Number of days to look back", "default": 30}
-                }
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_performance_summary",
-            "description": "Aggregate stats across all tracked signals.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_technical_analysis",
-            "description": "Technical analysis: RSI, MACD, patterns, trend analysis.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker symbol"},
-                    "as_of": {"type": "string", "description": "Date (YYYY-MM-DD) or 'latest'", "default": "latest"}
                 },
-                "required": ["ticker"]
+                "required": ["query"]
             },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "analyze_market_structure",
-            "description": "Options flow analysis: vol/OI walls, Greeks scanner. Use sort_by for contract details.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker symbol (e.g., NVDA)"},
-                    "as_of": {"type": "string", "description": "Date (YYYY-MM-DD) or 'latest'", "default": "latest"},
-                    "sort_by": {"type": "string", "description": "Sort contracts by: gamma, delta, volume, oi, iv"},
-                    "expiration_date": {"type": "string", "description": "Filter by expiration (YYYY-MM-DD)"},
-                    "option_type": {"type": "string", "description": "Filter by CALL or PUT"},
-                    "limit": {"type": "integer", "description": "Number of contracts to return", "default": 20}
-                },
-                "required": ["ticker"]
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_macro_thesis",
-            "description": "Current market conditions, sector rotation, risk factors.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_market_events",
-            "description": "Upcoming earnings, dividends, economic calendar.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD). Defaults to today."},
-                    "days_forward": {"type": "integer", "description": "Days to look ahead", "default": 7},
-                    "ticker": {"type": "string", "description": "Optional filter by stock ticker"},
-                    "event_type": {"type": "string", "description": "Filter by 'Earnings', 'Economic', 'Dividend', 'Split', 'IPO'"}
-                }
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_news_analysis",
-            "description": "News sentiment scores and catalysts for a ticker.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "Stock ticker symbol"},
-                    "as_of": {"type": "string", "description": "Date (YYYY-MM-DD) or 'latest'", "default": "latest"}
-                },
-                "required": ["ticker"]
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_business_summary",
-            "description": "Get business profile and summary.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                     "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                },
-                "required": ["ticker"]
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_fundamental_analysis",
-            "description": "Get fundamental metrics and ratios.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                     "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                },
-                "required": ["ticker"]
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-            "name": "get_financial_analysis",
-            "description": "Get financial health analysis and statements.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                     "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                },
-                "required": ["ticker"]
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-             "name": "run_price_query",
-             "description": "Run custom SQL query on price data.",
-             "inputSchema": {
-                 "type": "object",
-                 "properties": {
-                     "query": {"type": "string", "description": "SQL query"}
-                 },
-                 "required": ["query"]
-             },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-             "name": "web_search",
-             "description": "Search the web for real-time info.",
-             "inputSchema": {
-                 "type": "object",
-                 "properties": {
-                     "query": {"type": "string", "description": "Search query"}
-                 },
-                 "required": ["query"]
-             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": False,
                 "openWorldHint": True
             }
-        },
-        {
-             "name": "get_support_policy",
-             "description": "Get customer service policy and FAQ.",
-             "inputSchema": {
-                 "type": "object",
-                 "properties": {
-                     "query": {"type": "string", "description": "User question"}
-                 }
-             },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-             "name": "get_mda_analysis",
-             "description": "Get 10-K/Q MD&A insights.",
-             "inputSchema": {
-                 "type": "object",
-                 "properties": {
-                     "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                 },
-                 "required": ["ticker"]
-             },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
-        },
-        {
-             "name": "get_transcript_analysis",
-             "description": "Get earnings call transcript analysis.",
-             "inputSchema": {
-                 "type": "object",
-                 "properties": {
-                     "ticker": {"type": "string", "description": "Stock ticker symbol"}
-                 },
-                 "required": ["ticker"]
-             },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False
-            }
         }
     ]
 
 
-async def execute_tool(tool_name: str, args: dict, user_info: dict) -> str:
+async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> str:
     """Execute a tool by name with provided arguments."""
     tool_map = {
         "get_overnight_signals": get_overnight_signals,
+        "get_enriched_signals": get_enriched_signals,
         "get_signal_detail": get_signal_detail,
-        "get_top_movers": get_top_movers,
-        "get_market_themes": get_market_themes,
-        "get_macro_thesis": get_macro_thesis,
-        "get_mda_analysis": get_mda_analysis,
-        "get_transcript_analysis": get_transcript_analysis,
-        "analyze_market_structure": analyze_market_structure,
-        "get_technical_analysis": get_technical_analysis,
-        "get_news_analysis": get_news_analysis,
-        "get_business_summary": get_business_summary,
-        "get_fundamental_analysis": get_fundamental_analysis,
-        "get_financial_analysis": get_financial_analysis,
-        "run_price_query": run_price_query,
-        "get_market_events": get_market_events,
+        "get_todays_pick": get_todays_pick,
+        "get_freemium_preview": get_freemium_preview,
+        "get_signal_performance": get_signal_performance,
+        "get_win_rate_summary": get_win_rate_summary,
+        "get_open_position": get_open_position,
+        "get_position_history": get_position_history,
+        "get_daily_report": get_daily_report,
+        "get_report_list": get_report_list,
+        "get_available_dates": get_available_dates,
+        "get_enriched_signal_schema": get_enriched_signal_schema,
         "web_search": web_search,
-        "get_support_policy": get_support_policy,
-        "get_performance_tracker": get_performance_tracker,
-        "get_performance_summary": get_performance_summary,
     }
     
     if tool_name not in tool_map:
@@ -451,9 +418,14 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict) -> str:
     try:
         # Inject user_info into kwargs for tools that need it
         # We pass it as a hidden argument _user_info
-        args["_user_info"] = user_info
+        if user_info:
+            args["_user_info"] = user_info
         
-        result = await func(**args)
+        if inspect.iscoroutinefunction(func):
+            result = await func(**args)
+        else:
+            result = func(**args)
+            
         return result
     except Exception as e:
         logger.error(f"Error executing {tool_name}: {e}", exc_info=True)
@@ -475,56 +447,37 @@ async def server_card(request: Request):
             "icon": "https://gammarips.com/logo.png"
         },
         "authentication": {
-            "required": True,
-            "schemes": ["api-key"],
-            "instructions": "Get your API key at https://gammarips.com/developers. Pass via X-API-Key header."
-        },
-        "configuration": {
-            "type": "object",
-            "properties": {
-                "apiKey": {
-                    "type": "string",
-                    "description": "Your GammaRips API key (starts with gr_live_)",
-                    "secret": True
-                }
-            },
-            "required": ["apiKey"]
+            "required": False
         },
         "tools": get_tools_list(),
         "resources": [],
         "prompts": [
             {
-                "name": "get_trading_signals",
-                "description": "Get today's highest-conviction options trading signals with full analysis",
+                "name": "get_todays_signals",
+                "description": "Get today's high-conviction options trading signals",
                 "arguments": [
                     {
-                        "name": "focus",
-                        "description": "Optional focus: 'calls', 'puts', or 'both'",
+                        "name": "direction",
+                        "description": "Optional: 'bull' or 'bear'",
                         "required": False
                     }
                 ]
             },
             {
-                "name": "analyze_ticker",
-                "description": "Run comprehensive analysis on a specific stock ticker",
+                "name": "analyze_ticker_signal",
+                "description": "Get deep dive analysis for a specific ticker's signal",
                 "arguments": [
                     {
                         "name": "ticker",
-                        "description": "Stock ticker symbol (e.g., NVDA, AAPL)",
+                        "description": "Stock ticker symbol (e.g., NVDA)",
                         "required": True
                     }
                 ]
             },
             {
-                "name": "check_earnings_risk",
-                "description": "Check if a ticker has upcoming earnings that could affect options positions",
-                "arguments": [
-                    {
-                        "name": "ticker",
-                        "description": "Stock ticker symbol",
-                        "required": True
-                    }
-                ]
+                "name": "check_performance",
+                "description": "Check the win rate and performance of recent signals",
+                "arguments": []
             }
         ]
     })
@@ -535,28 +488,7 @@ async def handle_jsonrpc(request: Request):
     Stateless JSON-RPC endpoint for MCP tool discovery and direct calls.
     Used by Smithery and other MCP clients that don't support SSE transport.
     """
-    # Get API key from header
-    api_key = request.headers.get("X-API-Key") or request.headers.get("Authorization", "").replace("Bearer ", "")
-    
-    # Validate API key
-    try:
-        user_info = await auth_middleware.validate_api_key(api_key)
-    except ValueError as e:
-        return JSONResponse(
-            status_code=401,
-            content={
-                "jsonrpc": "2.0",
-                "id": None,
-                "error": {
-                    "code": -32001,
-                    "message": str(e),
-                    "data": {
-                        "signup_url": "https://gammarips.com/developers",
-                        "docs_url": "https://gammarips.com/developers#quick-start"
-                    }
-                }
-            }
-        )
+    # No auth check needed
     
     # Parse JSON-RPC request
     try:
@@ -605,10 +537,7 @@ async def handle_jsonrpc(request: Request):
         tool_args = params.get("arguments", {})
         
         try:
-            result = await execute_tool(tool_name, tool_args, user_info)
-            
-            # Track usage
-            await auth_middleware.track_usage(user_info["user_id"], tool_name)
+            result = await execute_tool(tool_name, tool_args, None)
             
             return JSONResponse(content={
                 "jsonrpc": "2.0",
@@ -630,6 +559,28 @@ async def handle_jsonrpc(request: Request):
         })
 
 
+class RequestLogger(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.time()
+        response = await call_next(request)
+        duration = time.time() - start
+        
+        # Log every request with useful metadata
+        logger.info(
+            "MCP_REQUEST",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+                "user_agent": request.headers.get("user-agent", "unknown"),
+                "origin": request.headers.get("origin", "unknown"),
+                "referer": request.headers.get("referer", "unknown"),
+                "duration_ms": round(duration * 1000),
+                "status": response.status_code,
+            }
+        )
+        return response
+
+
 # Expose ASGI app for production servers
 try:
     if hasattr(mcp, "sse_app"):
@@ -644,6 +595,17 @@ try:
     else:
         logger.warning("No explicit app method found, assuming mcp object is ASGI compatible")
         app = mcp
+
+    # Add middleware
+    app.add_middleware(RequestLogger)
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Open for maximum distribution
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Fix HTTP 421 errors by Monkey Patching TrustedHostMiddleware to bypass all checks
     try:
@@ -662,66 +624,6 @@ try:
         logger.warning("Could not import TrustedHostMiddleware for patching, skipping.")
     except Exception as e:
         logger.error(f"Failed to apply TrustedHostMiddleware patch: {e}", exc_info=True)
-
-    # --- Authentication Middleware ---
-    class APIKeyMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            # Skip auth for health checks or public endpoints
-            if request.url.path in ["/healthz", "/metrics", "/favicon.ico", "/.well-known/mcp/server-card.json"]:
-                return await call_next(request)
-            
-            # Skip if auth is disabled via env var
-            if not auth_middleware.require_api_key:
-                return await call_next(request)
-
-            # Extract API key from headers (X-API-Key or Authorization Bearer) or query param
-            api_key = request.headers.get("X-API-Key")
-            if not api_key:
-                auth_header = request.headers.get("Authorization", "")
-                if auth_header.startswith("Bearer "):
-                    api_key = auth_header.replace("Bearer ", "")
-            
-            # Fallback to query param
-            if not api_key:
-                api_key = request.query_params.get("api_key")
-            
-            try:
-                user = await auth_middleware.validate_api_key(api_key)
-                # Store user info in scope for tools to access (if needed)
-                request.scope["user"] = user
-                
-                # Track usage (optional - logic could be more granular per tool)
-                # await auth_middleware.track_usage(user["user_id"], "api_access")
-                
-                response = await call_next(request)
-                return response
-            except ValueError as e:
-                logger.warning(f"Auth failed: {e}")
-                return JSONResponse(
-                    {
-                        "error": str(e),
-                        "signup_url": "https://gammarips.com/developers",
-                        "docs_url": "https://gammarips.com/developers#quick-start",
-                        "support_email": "support@gammarips.com",
-                    },
-                    status_code=401,
-                )
-            except Exception as e:
-                logger.error(f"Auth error: {e}", exc_info=True)
-                return JSONResponse(
-                    {
-                        "error": "Internal authentication error",
-                        "signup_url": "https://gammarips.com/developers",
-                        "docs_url": "https://gammarips.com/developers#quick-start",
-                        "support_email": "support@gammarips.com",
-                    },
-                    status_code=500,
-                )
-
-    # Add the middleware
-    if os.getenv("REQUIRE_API_KEY", "false").lower() == "true":
-        app.add_middleware(APIKeyMiddleware)
-        logger.info("API Key Middleware added to application pipeline")
 
     # Add JSON-RPC endpoint (Phase 3: Smithery Support)
     app.add_route("/rpc", handle_jsonrpc, methods=["POST"])
@@ -756,30 +658,24 @@ def main():
     logger.info("Version: 1.0.0")
     logger.info(f"Project ID: {os.getenv('GCP_PROJECT_ID')}")
     logger.info(f"Port: {os.getenv('PORT', '8080')}")
-    logger.info(
-        f"Authentication: {'Enabled' if os.getenv('REQUIRE_API_KEY', 'false').lower() == 'true' else 'Disabled'}"
-    )
+    logger.info("Authentication: Disabled")
     logger.info("========================================")
     logger.info("")
     logger.info("Available tools:")
-    logger.info("  1. get_top_picks_analysis - 🎯 RECOMMENDED: Full trading analysis & top picks")
-    logger.info("  2. get_winners_dashboard - Get today's top options signals")
-    logger.info("  3. analyze_market_structure - Analyze options flow (Vol/OI Walls)")
-    logger.info("  4. get_stock_analysis - Get comprehensive stock analysis (Master Tool)")
-    logger.info("  5. get_macro_thesis - Get market context")
-    logger.info("  6. get_mda_analysis - Get 10-K/Q insights")
-    logger.info("  7. get_transcript_analysis - Get earnings call insights")
-    logger.info("  8. get_technical_analysis - Get technical analysis")
-    logger.info("  9. get_news_analysis - Get news sentiment analysis")
-    logger.info("  10. get_business_summary - Get business profile")
-    logger.info("  11. get_fundamental_analysis - Get fundamental metrics")
-    logger.info("  12. get_financial_analysis - Get financial health analysis")
-    logger.info("  13. run_price_query - Run custom SQL on price data")
-    logger.info("  14. get_market_events - Get upcoming calendar events (Earnings, Econ)")
-    logger.info("  15. web_search - Search the web for real-time info")
-    logger.info("  16. get_support_policy - Get customer service policy/FAQ")
-    logger.info("  17. get_performance_tracker - Get signal performance history")
-    logger.info("  18. get_performance_summary - Get aggregate performance stats")
+    logger.info("   1. get_overnight_signals")
+    logger.info("   2. get_enriched_signals")
+    logger.info("   3. get_signal_detail")
+    logger.info("   4. get_todays_pick        (V5.3 canonical pick)")
+    logger.info("   5. get_freemium_preview   (V5.3 top-N teaser)")
+    logger.info("   6. get_signal_performance")
+    logger.info("   7. get_win_rate_summary")
+    logger.info("   8. get_open_position      (V5.3 live position + Polygon mid)")
+    logger.info("   9. get_position_history   (V5.3 realized ledger)")
+    logger.info("  10. get_daily_report")
+    logger.info("  11. get_report_list")
+    logger.info("  12. get_available_dates")
+    logger.info("  13. get_enriched_signal_schema")
+    logger.info("  14. web_search")
     logger.info("")
     logger.info("Starting server...")
 
