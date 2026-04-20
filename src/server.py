@@ -3,11 +3,11 @@ GammaRips MCP Server
 Agent-first options trading intelligence platform
 """
 
+import inspect
 import json
 import logging
 import os
 import time
-import inspect
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -30,21 +30,21 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
 # Import tools
+from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.overnight_signals import (
-    get_overnight_signals,
     get_enriched_signals,
+    get_freemium_preview,
+    get_overnight_signals,
     get_signal_detail,
     get_todays_pick,
-    get_freemium_preview,
 )
 from tools.performance_tracker import (
-    get_signal_performance,
-    get_win_rate_summary,
     get_open_position,
     get_position_history,
+    get_signal_performance,
+    get_win_rate_summary,
 )
 from tools.reports import get_daily_report, get_report_list
-from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.web_search import web_search
 
 # Register tools with the MCP server
@@ -75,34 +75,31 @@ def get_tools_list():
                 "properties": {
                     "scan_date": {
                         "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date.",
                     },
                     "direction": {
                         "type": "string",
                         "enum": ["bull", "bear"],
-                        "description": "Filter by direction"
+                        "description": "Filter by direction",
                     },
                     "min_score": {
                         "type": "integer",
-                        "description": "Minimum conviction score (1-10)"
+                        "description": "Minimum conviction score (1-10)",
                     },
-                    "ticker": {
-                        "type": "string",
-                        "description": "Filter by specific ticker symbol"
-                    },
+                    "ticker": {"type": "string", "description": "Filter by specific ticker symbol"},
                     "limit": {
                         "type": "integer",
                         "default": 50,
-                        "description": "Max results to return"
-                    }
-                }
+                        "description": "Max results to return",
+                    },
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_enriched_signals",
@@ -112,30 +109,27 @@ def get_tools_list():
                 "properties": {
                     "scan_date": {
                         "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date.",
                     },
                     "direction": {
                         "type": "string",
                         "enum": ["bull", "bear"],
-                        "description": "Filter by direction"
+                        "description": "Filter by direction",
                     },
-                    "ticker": {
-                        "type": "string",
-                        "description": "Filter by specific ticker symbol"
-                    },
+                    "ticker": {"type": "string", "description": "Filter by specific ticker symbol"},
                     "limit": {
                         "type": "integer",
                         "default": 25,
-                        "description": "Max results to return"
-                    }
-                }
+                        "description": "Max results to return",
+                    },
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_signal_detail",
@@ -143,23 +137,20 @@ def get_tools_list():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "The ticker symbol"
-                    },
+                    "ticker": {"type": "string", "description": "The ticker symbol"},
                     "scan_date": {
                         "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
-                    }
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
+                    },
                 },
-                "required": ["ticker"]
+                "required": ["ticker"],
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_signal_performance",
@@ -167,37 +158,27 @@ def get_tools_list():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "scan_date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD)"
-                    },
-                    "ticker": {
-                        "type": "string",
-                        "description": "Filter to specific ticker"
-                    },
+                    "scan_date": {"type": "string", "description": "Filter by date (YYYY-MM-DD)"},
+                    "ticker": {"type": "string", "description": "Filter to specific ticker"},
                     "direction": {
                         "type": "string",
                         "enum": ["bull", "bear"],
-                        "description": "Filter by direction"
+                        "description": "Filter by direction",
                     },
                     "outcome": {
                         "type": "string",
                         "enum": ["win", "loss"],
-                        "description": "Filter by outcome"
+                        "description": "Filter by outcome",
                     },
-                    "limit": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Max results"
-                    }
-                }
+                    "limit": {"type": "integer", "default": 50, "description": "Max results"},
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_win_rate_summary",
@@ -208,16 +189,16 @@ def get_tools_list():
                     "days": {
                         "type": "integer",
                         "default": 30,
-                        "description": "Lookback period in days"
+                        "description": "Lookback period in days",
                     }
-                }
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_daily_report",
@@ -227,16 +208,16 @@ def get_tools_list():
                 "properties": {
                     "date": {
                         "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
                     }
-                }
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_report_list",
@@ -247,30 +228,27 @@ def get_tools_list():
                     "limit": {
                         "type": "integer",
                         "default": 10,
-                        "description": "Number of reports to return"
+                        "description": "Number of reports to return",
                     }
-                }
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_available_dates",
             "description": "Returns which scan dates have data available.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            },
+            "inputSchema": {"type": "object", "properties": {}},
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_todays_pick",
@@ -280,16 +258,16 @@ def get_tools_list():
                 "properties": {
                     "scan_date": {
                         "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent."
+                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
                     }
-                }
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_freemium_preview",
@@ -300,30 +278,27 @@ def get_tools_list():
                     "limit": {
                         "type": "integer",
                         "default": 5,
-                        "description": "Number of preview rows (clamped 1-20)"
+                        "description": "Number of preview rows (clamped 1-20)",
                     }
-                }
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_open_position",
             "description": "Returns the current V5.3 trade status in three pieces so a chat agent can answer 'what trade am I in right now?' honestly. IMPORTANT: the paper-trader is a BATCH simulator — it does not hold live positions in the ledger. This tool returns {pending_pick (from Firestore todays_pick — the next trade to enter at 10:00 ET), awaiting_simulation (scan_dates still inside their 3-day hold window awaiting reconciliation), most_recent_closed_trade (last ledger row with real entry + exit), explanation (plain-English narrative)}.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            },
+            "inputSchema": {"type": "object", "properties": {}},
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_position_history",
@@ -334,35 +309,32 @@ def get_tools_list():
                     "days": {
                         "type": "integer",
                         "default": 30,
-                        "description": "Lookback window in days"
+                        "description": "Lookback window in days",
                     },
                     "limit": {
                         "type": "integer",
                         "default": 50,
-                        "description": "Max rows (clamped 1-200)"
-                    }
-                }
+                        "description": "Max rows (clamped 1-200)",
+                    },
+                },
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "get_enriched_signal_schema",
             "description": "Returns the BigQuery column schema of overnight_signals_enriched. Chat agents use this to introspect available fields before asking 'why this pick?' without hallucinating field names.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            },
+            "inputSchema": {"type": "object", "properties": {}},
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": False
-            }
+                "openWorldHint": False,
+            },
         },
         {
             "name": "web_search",
@@ -370,25 +342,22 @@ def get_tools_list():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    },
+                    "query": {"type": "string", "description": "Search query"},
                     "num_results": {
                         "type": "integer",
                         "default": 5,
-                        "description": "Number of results to return"
-                    }
+                        "description": "Number of results to return",
+                    },
                 },
-                "required": ["query"]
+                "required": ["query"],
             },
             "annotations": {
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": False,
-                "openWorldHint": True
-            }
-        }
+                "openWorldHint": True,
+            },
+        },
     ]
 
 
@@ -410,22 +379,22 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> st
         "get_enriched_signal_schema": get_enriched_signal_schema,
         "web_search": web_search,
     }
-    
+
     if tool_name not in tool_map:
         raise ValueError(f"Tool not found: {tool_name}")
-        
+
     func = tool_map[tool_name]
     try:
         # Inject user_info into kwargs for tools that need it
         # We pass it as a hidden argument _user_info
         if user_info:
             args["_user_info"] = user_info
-        
+
         if inspect.iscoroutinefunction(func):
             result = await func(**args)
         else:
             result = func(**args)
-            
+
         return result
     except Exception as e:
         logger.error(f"Error executing {tool_name}: {e}", exc_info=True)
@@ -437,50 +406,50 @@ async def server_card(request: Request):
     Server discovery card for Smithery and other MCP registries.
     https://smithery.ai/docs/build/external#server-scanning
     """
-    return JSONResponse({
-        "serverInfo": {
-            "name": "GammaRips",
-            "displayName": "GammaRips Options Intelligence",
-            "version": "1.0.0",
-            "description": "AI-powered options trading signals. Get high-conviction setups backed by fundamentals, technicals, and options flow analysis. 64% win rate across 200+ tracked signals.",
-            "homepage": "https://gammarips.com/developers",
-            "icon": "https://gammarips.com/logo.png"
-        },
-        "authentication": {
-            "required": False
-        },
-        "tools": get_tools_list(),
-        "resources": [],
-        "prompts": [
-            {
-                "name": "get_todays_signals",
-                "description": "Get today's high-conviction options trading signals",
-                "arguments": [
-                    {
-                        "name": "direction",
-                        "description": "Optional: 'bull' or 'bear'",
-                        "required": False
-                    }
-                ]
+    return JSONResponse(
+        {
+            "serverInfo": {
+                "name": "GammaRips",
+                "displayName": "GammaRips Options Intelligence",
+                "version": "1.0.0",
+                "description": "AI-powered options trading signals. Get high-conviction setups backed by fundamentals, technicals, and options flow analysis. 64% win rate across 200+ tracked signals.",
+                "homepage": "https://gammarips.com/developers",
+                "icon": "https://gammarips.com/logo.png",
             },
-            {
-                "name": "analyze_ticker_signal",
-                "description": "Get deep dive analysis for a specific ticker's signal",
-                "arguments": [
-                    {
-                        "name": "ticker",
-                        "description": "Stock ticker symbol (e.g., NVDA)",
-                        "required": True
-                    }
-                ]
-            },
-            {
-                "name": "check_performance",
-                "description": "Check the win rate and performance of recent signals",
-                "arguments": []
-            }
-        ]
-    })
+            "authentication": {"required": False},
+            "tools": get_tools_list(),
+            "resources": [],
+            "prompts": [
+                {
+                    "name": "get_todays_signals",
+                    "description": "Get today's high-conviction options trading signals",
+                    "arguments": [
+                        {
+                            "name": "direction",
+                            "description": "Optional: 'bull' or 'bear'",
+                            "required": False,
+                        }
+                    ],
+                },
+                {
+                    "name": "analyze_ticker_signal",
+                    "description": "Get deep dive analysis for a specific ticker's signal",
+                    "arguments": [
+                        {
+                            "name": "ticker",
+                            "description": "Stock ticker symbol (e.g., NVDA)",
+                            "required": True,
+                        }
+                    ],
+                },
+                {
+                    "name": "check_performance",
+                    "description": "Check the win rate and performance of recent signals",
+                    "arguments": [],
+                },
+            ],
+        }
+    )
 
 
 async def handle_jsonrpc(request: Request):
@@ -489,7 +458,7 @@ async def handle_jsonrpc(request: Request):
     Used by Smithery and other MCP clients that don't support SSE transport.
     """
     # No auth check needed
-    
+
     # Parse JSON-RPC request
     try:
         body = await request.json()
@@ -499,64 +468,69 @@ async def handle_jsonrpc(request: Request):
             content={
                 "jsonrpc": "2.0",
                 "id": None,
-                "error": {"code": -32700, "message": "Parse error"}
-            }
+                "error": {"code": -32700, "message": "Parse error"},
+            },
         )
-    
+
     request_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params", {})
-    
+
     # Handle methods
     if method == "initialize":
-        return JSONResponse(content={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {
-                    "name": "gammarips-mcp",
-                    "version": "1.0.0"
-                }
+        return JSONResponse(
+            content={
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "gammarips-mcp", "version": "1.0.0"},
+                },
             }
-        })
-    
+        )
+
     elif method == "tools/list":
         # Return list of available tools
         tools = get_tools_list()
-        return JSONResponse(content={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {"tools": tools}
-        })
-    
+        return JSONResponse(
+            content={"jsonrpc": "2.0", "id": request_id, "result": {"tools": tools}}
+        )
+
     elif method == "tools/call":
         # Handle tool calls
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
-        
+
         try:
             result = await execute_tool(tool_name, tool_args, None)
-            
-            return JSONResponse(content={
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
-            })
+
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [{"type": "text", "text": json.dumps(result, default=str)}]
+                    },
+                }
+            )
         except Exception as e:
-            return JSONResponse(content={
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32603, "message": str(e)},
+                }
+            )
+
+    else:
+        return JSONResponse(
+            content={
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {"code": -32603, "message": str(e)}
-            })
-    
-    else:
-        return JSONResponse(content={
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {"code": -32601, "message": f"Method not found: {method}"}
-        })
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+            }
+        )
 
 
 class RequestLogger(BaseHTTPMiddleware):
@@ -564,7 +538,7 @@ class RequestLogger(BaseHTTPMiddleware):
         start = time.time()
         response = await call_next(request)
         duration = time.time() - start
-        
+
         # Log every request with useful metadata
         logger.info(
             "MCP_REQUEST",
@@ -576,7 +550,7 @@ class RequestLogger(BaseHTTPMiddleware):
                 "referer": request.headers.get("referer", "unknown"),
                 "duration_ms": round(duration * 1000),
                 "status": response.status_code,
-            }
+            },
         )
         return response
 
@@ -598,7 +572,7 @@ try:
 
     # Add middleware
     app.add_middleware(RequestLogger)
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # Open for maximum distribution
@@ -628,7 +602,7 @@ try:
     # Add JSON-RPC endpoint (Phase 3: Smithery Support)
     app.add_route("/rpc", handle_jsonrpc, methods=["POST"])
     app.add_route("/jsonrpc", handle_jsonrpc, methods=["POST"])
-    
+
     # Add Server Card (Discovery)
     app.add_route("/.well-known/mcp/server-card.json", server_card, methods=["GET"])
     logger.info("Added stateless JSON-RPC endpoints and server card")

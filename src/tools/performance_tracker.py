@@ -4,7 +4,7 @@ Performance tracking tools for GammaRips MCP
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from google.cloud import bigquery
@@ -21,7 +21,7 @@ except Exception as e:
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip() or None
 
 
-def _polygon_option_mid(contract: str) -> Optional[float]:
+def _polygon_option_mid(contract: str) -> float | None:
     """Return the current mid price for a Polygon option contract (e.g.
     "O:FIX260515C01780000"). Returns None on any failure or when POLYGON_API_KEY
     is not mounted — callers must handle None gracefully."""
@@ -46,35 +46,36 @@ def _polygon_option_mid(contract: str) -> Optional[float]:
         resp = httpx.get(url, params={"apiKey": POLYGON_API_KEY}, timeout=5.0)
         resp.raise_for_status()
         data = resp.json().get("results") or {}
-        lq = (data.get("last_quote") or {})
+        lq = data.get("last_quote") or {}
         bid, ask = lq.get("bid"), lq.get("ask")
         if bid is not None and ask is not None and ask > 0:
             return round((bid + ask) / 2, 4)
         # Fallback to last trade if quote not available
-        lt = (data.get("last_trade") or {})
+        lt = data.get("last_trade") or {}
         price = lt.get("price")
         return float(price) if price is not None else None
     except Exception as e:
         logger.warning(f"Polygon option snapshot failed for {contract}: {e}")
         return None
 
+
 def get_signal_performance(
-    scan_date: Optional[str] = None,
-    ticker: Optional[str] = None,
-    direction: Optional[str] = None,
-    outcome: Optional[str] = None,
-    limit: int = 50
-) -> List[Dict[str, Any]]:
+    scan_date: str | None = None,
+    ticker: str | None = None,
+    direction: str | None = None,
+    outcome: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
     """
     Track how signals actually performed against market outcomes.
-    
+
     Args:
         scan_date: Filter by date (YYYY-MM-DD).
         ticker: Filter to specific ticker.
         direction: "bull" or "bear".
         outcome: "win" or "loss" to filter.
         limit: Max results (default 50).
-        
+
     Returns:
         Performance records with: ticker, direction, score, entry_price, current_price, pnl_pct, outcome, scan_date.
     """
@@ -84,61 +85,60 @@ def get_signal_performance(
     try:
         # scan_date is STRING in this table
         base_query = """
-            SELECT 
-                ticker, direction, signal_score as score, signal_price as entry_price, current_price, 
-                pct_change as pnl_pct, is_win, scan_date 
+            SELECT
+                ticker, direction, signal_score as score, signal_price as entry_price, current_price,
+                pct_change as pnl_pct, is_win, scan_date
             FROM `profitscout-fida8.profit_scout.signal_performance`
             WHERE 1=1
         """
-        
+
         query_params = []
-        
+
         if scan_date:
             base_query += " AND scan_date = @scan_date"
             query_params.append(bigquery.ScalarQueryParameter("scan_date", "STRING", scan_date))
-            
+
         if ticker:
             base_query += " AND ticker = @ticker"
             query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
-            
+
         if direction:
             base_query += " AND LOWER(direction) = LOWER(@direction)"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
-            
+
         if outcome:
             # outcome 'win' -> is_win = TRUE, 'loss' -> is_win = FALSE
-            is_win_val = (outcome.lower() == "win")
+            is_win_val = outcome.lower() == "win"
             base_query += " AND is_win = @is_win"
             query_params.append(bigquery.ScalarQueryParameter("is_win", "BOOL", is_win_val))
-            
+
         base_query += " ORDER BY scan_date DESC, score DESC LIMIT @limit"
         query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
-        
+
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(base_query, job_config=job_config)
-        
+
         results = []
         for row in query_job.result():
             r = dict(row)
             # Add 'outcome' string field for compatibility
-            r['outcome'] = 'WIN' if r.get('is_win') else 'LOSS'
+            r["outcome"] = "WIN" if r.get("is_win") else "LOSS"
             results.append(r)
-            
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in get_signal_performance: {e}")
         return [{"error": str(e)}]
 
-def get_win_rate_summary(
-    days: int = 30
-) -> Dict[str, Any]:
+
+def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
     """
     Aggregate performance statistics.
-    
+
     Args:
         days: Lookback period in days (default 30).
-        
+
     Returns:
         Summary statistics object.
     """
@@ -181,7 +181,7 @@ def get_win_rate_summary(
                 ORDER BY avg_pnl ASC
                 LIMIT 1
             )
-            SELECT 
+            SELECT
                 s.*,
                 b.ticker as best_performer,
                 w.ticker as worst_performer
@@ -189,45 +189,43 @@ def get_win_rate_summary(
             LEFT JOIN best_ticker b ON 1=1
             LEFT JOIN worst_ticker w ON 1=1
         """
-        
-        query_params = [
-            bigquery.ScalarQueryParameter("days", "INTEGER", days)
-        ]
-        
+
+        query_params = [bigquery.ScalarQueryParameter("days", "INTEGER", days)]
+
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(query, job_config=job_config)
-        
+
         result = {}
         for row in query_job.result():
             result = dict(row)
             break
-            
+
         if not result:
             return {"message": "No performance data found for this period"}
-            
+
         # Calculate percentages
-        total = result.get('total_signals', 0)
+        total = result.get("total_signals", 0)
         if total > 0:
-            result['win_rate'] = round((result.get('wins', 0) / total) * 100, 2)
+            result["win_rate"] = round((result.get("wins", 0) / total) * 100, 2)
         else:
-            result['win_rate'] = 0.0
-            
-        bull_total = result.get('bull_total', 0)
+            result["win_rate"] = 0.0
+
+        bull_total = result.get("bull_total", 0)
         if bull_total > 0:
-            result['bull_win_rate'] = round((result.get('bull_wins', 0) / bull_total) * 100, 2)
-            
-        bear_total = result.get('bear_total', 0)
+            result["bull_win_rate"] = round((result.get("bull_wins", 0) / bull_total) * 100, 2)
+
+        bear_total = result.get("bear_total", 0)
         if bear_total > 0:
-            result['bear_win_rate'] = round((result.get('bear_wins', 0) / bear_total) * 100, 2)
+            result["bear_win_rate"] = round((result.get("bear_wins", 0) / bear_total) * 100, 2)
 
         return result
-        
+
     except Exception as e:
         logger.error(f"Error in get_win_rate_summary: {e}")
         return {"error": str(e)}
 
 
-def get_open_position() -> Dict[str, Any]:
+def get_open_position() -> dict[str, Any]:
     """
     Returns the current V5.3 trade status across three surfaces that together
     answer 'what trade am I in right now?' for a chat agent.
@@ -261,7 +259,7 @@ def get_open_position() -> Dict[str, Any]:
     if not client:
         return {"error": "BigQuery client not initialized"}
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "explanation": None,
         "pending_pick": None,
         "awaiting_simulation": [],
@@ -271,6 +269,7 @@ def get_open_position() -> Dict[str, Any]:
     # --- 1. pending_pick from Firestore todays_pick/{latest scan_date} ---
     try:
         from google.cloud import firestore as _fs  # local to avoid hard coupling
+
         fs = _fs.Client(project="profitscout-fida8")
         docs = list(
             fs.collection("todays_pick")
@@ -306,9 +305,7 @@ def get_open_position() -> Dict[str, Any]:
             WHERE l.scan_date IS NULL
             ORDER BY e.scan_date DESC
         """
-        result["awaiting_simulation"] = [
-            str(row.scan_date) for row in client.query(q).result()
-        ]
+        result["awaiting_simulation"] = [str(row.scan_date) for row in client.query(q).result()]
     except Exception as e:
         logger.warning(f"awaiting_simulation query failed: {e}")
 
@@ -384,7 +381,7 @@ def get_open_position() -> Dict[str, Any]:
 def get_position_history(
     days: int = 30,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Returns realized (closed) V5.3 paper trades from the last N days, row-level,
     for chat-agent answers like "show me recent wins/losses" or "how did FIX do".
@@ -429,10 +426,12 @@ def get_position_history(
             ORDER BY exit_timestamp DESC
             LIMIT @limit
         """
-        job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("days", "INTEGER", days),
-            bigquery.ScalarQueryParameter("limit", "INTEGER", limit),
-        ])
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("days", "INTEGER", days),
+                bigquery.ScalarQueryParameter("limit", "INTEGER", limit),
+            ]
+        )
 
         results = []
         for row in client.query(query, job_config=job_config).result():

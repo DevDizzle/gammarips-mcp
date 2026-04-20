@@ -3,7 +3,8 @@ Overnight Edge tools for GammaRips MCP
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from google.cloud import bigquery, firestore
 
 logger = logging.getLogger(__name__)
@@ -21,13 +22,14 @@ except Exception as e:
     logger.error(f"Failed to initialize Firestore client: {e}")
     fs_client = None
 
+
 def get_overnight_signals(
-    scan_date: Optional[str] = None,
-    direction: Optional[str] = None,
+    scan_date: str | None = None,
+    direction: str | None = None,
     min_score: int = 0,
-    ticker: Optional[str] = None,
-    limit: int = 50
-) -> List[Dict[str, Any]]:
+    ticker: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
     """
     Returns raw overnight scanner signals for a given date.
     """
@@ -43,71 +45,70 @@ def get_overnight_signals(
             for row in results:
                 scan_date = str(row.max_date) if row.max_date else None
                 break
-        
+
         if not scan_date:
             return [{"error": "No data found in overnight_signals table"}]
 
         # Build query
         # Mapping fields to expected output
         base_query = """
-            SELECT 
-                ticker, 
-                direction, 
-                overnight_score as score, 
-                day_volume as volume, 
-                total_options_dollar_volume as premium, 
-                recommended_expiration as expiration, 
-                recommended_strike as strike, 
-                scan_date 
+            SELECT
+                ticker,
+                direction,
+                overnight_score as score,
+                day_volume as volume,
+                total_options_dollar_volume as premium,
+                recommended_expiration as expiration,
+                recommended_strike as strike,
+                scan_date
             FROM `profitscout-fida8.profit_scout.overnight_signals`
             WHERE scan_date = @scan_date
         """
-        
-        query_params = [
-            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
-        ]
-        
+
+        query_params = [bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
+
         if direction:
             base_query += " AND LOWER(direction) = LOWER(@direction)"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
-            
+
         if min_score > 0:
             base_query += " AND overnight_score >= @min_score"
             query_params.append(bigquery.ScalarQueryParameter("min_score", "INTEGER", min_score))
-            
+
         if ticker:
             base_query += " AND ticker = @ticker"
             query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
-            
+
         base_query += " ORDER BY overnight_score DESC LIMIT @limit"
         query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
-        
+
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(base_query, job_config=job_config)
-        
+
         results = []
         for row in query_job.result():
             results.append(dict(row))
-            
+
         # Convert date objects to strings for JSON serialization
         for r in results:
-            if 'scan_date' in r and r['scan_date']:
-                r['scan_date'] = str(r['scan_date'])
-            if 'expiration' in r and r['expiration']:
-                r['expiration'] = str(r['expiration'])
-                
+            if "scan_date" in r and r["scan_date"]:
+                r["scan_date"] = str(r["scan_date"])
+            if "expiration" in r and r["expiration"]:
+                r["expiration"] = str(r["expiration"])
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in get_overnight_signals: {e}")
         return [{"error": str(e)}]
 
+
 def get_enriched_signals(
-    scan_date: Optional[str] = None,
-    direction: Optional[str] = None,
-    ticker: Optional[str] = None,
-    limit: int = 25
-) -> List[Dict[str, Any]]:
+    scan_date: str | None = None,
+    direction: str | None = None,
+    ticker: str | None = None,
+    limit: int = 25,
+) -> list[dict[str, Any]]:
     """
     Returns AI-enriched overnight signals for a scan_date (news, technicals,
     catalyst analysis, contract recommendation).
@@ -130,57 +131,53 @@ def get_enriched_signals(
             for row in results:
                 scan_date = str(row.max_date) if row.max_date else None
                 break
-        
+
         if not scan_date:
             return [{"error": "No data found in overnight_signals_enriched table"}]
 
         # Build query
         base_query = """
-            SELECT * 
+            SELECT *
             FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
             WHERE scan_date = @scan_date
         """
-        
-        query_params = [
-            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
-        ]
-        
+
+        query_params = [bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
+
         if direction:
             base_query += " AND LOWER(direction) = LOWER(@direction)"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
-            
+
         if ticker:
             base_query += " AND ticker = @ticker"
             query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
-            
+
         base_query += " ORDER BY overnight_score DESC LIMIT @limit"
         query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
-        
+
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(base_query, job_config=job_config)
-        
+
         results = []
         for row in query_job.result():
             results.append(dict(row))
-            
+
         # Convert date/datetime objects to strings
         for r in results:
             for k, v in r.items():
-                if hasattr(v, 'isoformat'):
+                if hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
-                elif hasattr(v, 'strftime'):
+                elif hasattr(v, "strftime"):
                     r[k] = str(v)
-                
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in get_enriched_signals: {e}")
         return [{"error": str(e)}]
 
-def get_signal_detail(
-    ticker: str,
-    scan_date: Optional[str] = None
-) -> Dict[str, Any]:
+
+def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, Any]:
     """
     Deep dive on a single ticker's overnight signal.
     """
@@ -192,54 +189,54 @@ def get_signal_detail(
         if not scan_date:
             # First try to find the latest date for this specific ticker
             query = """
-                SELECT MAX(scan_date) as max_date 
+                SELECT MAX(scan_date) as max_date
                 FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
                 WHERE ticker = @ticker
             """
-            job_config = bigquery.QueryJobConfig(query_parameters=[
-                bigquery.ScalarQueryParameter("ticker", "STRING", ticker)
-            ])
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[bigquery.ScalarQueryParameter("ticker", "STRING", ticker)]
+            )
             query_job = client.query(query, job_config=job_config)
             results = query_job.result()
             for row in results:
                 scan_date = str(row.max_date) if row.max_date else None
                 break
-        
+
         if not scan_date:
             return {"error": f"No signal found for ticker {ticker}"}
 
         # Build query
         query = """
-            SELECT * 
+            SELECT *
             FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
             WHERE ticker = @ticker AND scan_date = @scan_date
             LIMIT 1
         """
-        
+
         query_params = [
             bigquery.ScalarQueryParameter("ticker", "STRING", ticker),
-            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)
+            bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date),
         ]
-        
+
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(query, job_config=job_config)
-        
+
         results = []
         for row in query_job.result():
             results.append(dict(row))
-            
+
         if not results:
             return {"error": f"Signal not found for {ticker} on {scan_date}"}
-            
+
         result = results[0]
-        
+
         # Convert date/datetime objects to strings
         for k, v in result.items():
-            if hasattr(v, 'isoformat'):
+            if hasattr(v, "isoformat"):
                 result[k] = v.isoformat()
-            elif hasattr(v, 'strftime'):
+            elif hasattr(v, "strftime"):
                 result[k] = str(v)
-                
+
         return result
 
     except Exception as e:
@@ -247,9 +244,7 @@ def get_signal_detail(
         return {"error": str(e)}
 
 
-def get_todays_pick(
-    scan_date: Optional[str] = None
-) -> Dict[str, Any]:
+def get_todays_pick(scan_date: str | None = None) -> dict[str, Any]:
     """
     Returns GammaRips' canonical daily V5.3 pick from Firestore todays_pick/{scan_date}.
 
@@ -302,9 +297,7 @@ def get_todays_pick(
         return {"error": str(e)}
 
 
-def get_freemium_preview(
-    limit: int = 5
-) -> List[Dict[str, Any]]:
+def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
     """
     Top N enriched signals for the most recent scan, with minimal fields. Used
     for public/freemium teasers: ticker, direction, score, headline, directional

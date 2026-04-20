@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from tools.customer_service import get_support_policy
+
 from tools.web_search import web_search
 
 # --- Tests for Customer Service Tool ---

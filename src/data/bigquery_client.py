@@ -172,7 +172,7 @@ class BigQueryClient:
         try:
             query_job = self.client.query(query, job_config=job_config)
             results = query_job.result()
-            
+
             signals = []
             for row in results:
                 sig = dict(row.items())
@@ -180,11 +180,11 @@ class BigQueryClient:
                 for key, value in sig.items():
                     if hasattr(value, "isoformat"):
                         sig[key] = value.isoformat()
-                
+
                 # Map 'signals' to 'key_signals' for frontend compatibility if needed
                 if "signals" in sig and "key_signals" not in sig:
                     sig["key_signals"] = sig["signals"]
-                
+
                 signals.append(sig)
 
             return {
@@ -223,20 +223,20 @@ class BigQueryClient:
         try:
             query_job = self.client.query(query, job_config=job_config)
             results = list(query_job.result())
-            
+
             if not results:
                 return None
-                
+
             sig = dict(results[0].items())
             # Serialize
             for key, value in sig.items():
                 if hasattr(value, "isoformat"):
                     sig[key] = value.isoformat()
-            
+
             # Map 'signals' to 'key_signals'
             if "signals" in sig and "key_signals" not in sig:
                 sig["key_signals"] = sig["signals"]
-            
+
             return sig
         except Exception as e:
             logger.error(f"Error getting signal detail for {ticker}: {e}")
@@ -257,7 +257,7 @@ class BigQueryClient:
         ORDER BY overnight_score DESC, price_change_pct DESC
         LIMIT @count
         """
-        
+
         # Get Bearish
         bear_query = f"""
         SELECT ticker, overnight_score, price_change_pct, signals as key_signals, CAST(NULL as STRING) as catalyst_summary
@@ -271,24 +271,21 @@ class BigQueryClient:
             bigquery.ScalarQueryParameter("run_date", "STRING", run_date),
             bigquery.ScalarQueryParameter("count", "INT64", count),
         ]
-        
+
         job_config = bigquery.QueryJobConfig(query_parameters=params)
 
         try:
             bull_job = self.client.query(bull_query, job_config=job_config)
             bear_job = self.client.query(bear_query, job_config=job_config)
-            
+
             bullish = [dict(r.items()) for r in bull_job.result()]
             bearish = [dict(r.items()) for r in bear_job.result()]
-            
+
             return {
                 "scan_date": run_date,
-                "summary": {
-                    "bullish_count": len(bullish),
-                    "bearish_count": len(bearish)
-                },
+                "summary": {"bullish_count": len(bullish), "bearish_count": len(bearish)},
                 "top_bullish": bullish,
-                "top_bearish": bearish
+                "top_bearish": bearish,
             }
         except Exception as e:
             logger.error(f"Error querying top movers: {e}")
@@ -298,11 +295,7 @@ class BigQueryClient:
         """Get market themes (stub using signals aggregation for now)."""
         # In a real implementation, this would query a themes table or aggregate signals
         # For now, let's just return a placeholder or aggregate signals by sector if available
-        return {
-            "scan_date": date, 
-            "themes": []
-        }
-
+        return {"scan_date": date, "themes": []}
 
     async def get_market_structure(self, ticker: str, as_of: str = "latest") -> dict[str, Any]:
         """Get market structure (Option Flow & Positioning) for a ticker.

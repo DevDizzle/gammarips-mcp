@@ -5,6 +5,7 @@ import sys
 sys.path.append(os.path.join(os.getcwd(), "src"))
 
 from tools.market_structure import analyze_market_structure
+
 from tools.web_search import web_search
 
 print("Modules imported successfully.")

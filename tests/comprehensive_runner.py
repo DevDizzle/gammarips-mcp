@@ -42,8 +42,9 @@ try:
     from tools.price_data_sql import run_price_query
     from tools.stock_analysis import get_stock_analysis
     from tools.technical_analysis import get_technical_analysis
-    from tools.web_search import web_search
     from tools.winners_dashboard import get_winners_dashboard
+
+    from tools.web_search import web_search
 except ImportError as e:
     logger.error(f"Failed to import tools: {e}")
     sys.exit(1)

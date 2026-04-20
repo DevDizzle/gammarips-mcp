@@ -1,9 +1,9 @@
-
 import asyncio
 import json
 import logging
 import os
 import sys
+
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -17,12 +17,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ToolVerifier")
 
 try:
+    from tools.news_analysis import get_news_analysis
     from tools.top_picks_analysis import get_top_picks_analysis
     from tools.winners_dashboard import get_winners_dashboard
-    from tools.news_analysis import get_news_analysis
 except ImportError as e:
     logger.error(f"Failed to import tools: {e}")
     sys.exit(1)
+
 
 async def verify_tools():
     print("=== Verifying Tools ===")
@@ -48,16 +49,17 @@ async def verify_tools():
     try:
         res = await get_top_picks_analysis(limit=2)
         print(f"Success. Result preview: {res[:500]}...")
-        
+
         # Parse logic check
         data = json.loads(res)
         print(f"Analyzed {data.get('candidates_analyzed')}")
         print(f"Qualified {data.get('candidates_qualified')}")
-        if data.get('avoid'):
+        if data.get("avoid"):
             print(f"Avoid example: {data['avoid'][0]}")
-            
+
     except Exception as e:
         print(f"Failed: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(verify_tools())

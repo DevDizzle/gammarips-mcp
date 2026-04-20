@@ -3,7 +3,8 @@ Metadata tools for GammaRips MCP
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from google.cloud import bigquery
 
 logger = logging.getLogger(__name__)
@@ -15,10 +16,11 @@ except Exception as e:
     logger.error(f"Failed to initialize BigQuery client: {e}")
     client = None
 
-def get_available_dates() -> List[Dict[str, Any]]:
+
+def get_available_dates() -> list[dict[str, Any]]:
     """
     Returns which scan dates have data available.
-    
+
     Returns:
         List of {scan_date, signal_count}
     """
@@ -27,32 +29,29 @@ def get_available_dates() -> List[Dict[str, Any]]:
 
     try:
         query = """
-            SELECT 
-                scan_date, 
-                COUNT(*) as signal_count 
-            FROM `profitscout-fida8.profit_scout.overnight_signals` 
-            GROUP BY scan_date 
-            ORDER BY scan_date DESC 
+            SELECT
+                scan_date,
+                COUNT(*) as signal_count
+            FROM `profitscout-fida8.profit_scout.overnight_signals`
+            GROUP BY scan_date
+            ORDER BY scan_date DESC
             LIMIT 30
         """
-        
+
         query_job = client.query(query)
-        
+
         results = []
         for row in query_job.result():
-            results.append({
-                "scan_date": str(row.scan_date),
-                "signal_count": row.signal_count
-            })
-            
+            results.append({"scan_date": str(row.scan_date), "signal_count": row.signal_count})
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in get_available_dates: {e}")
         return [{"error": str(e)}]
 
 
-def get_enriched_signal_schema() -> List[Dict[str, Any]]:
+def get_enriched_signal_schema() -> list[dict[str, Any]]:
     """
     Returns the column schema of overnight_signals_enriched (BigQuery). Chat
     agents use this to introspect which fields are available when answering
@@ -73,11 +72,13 @@ def get_enriched_signal_schema() -> List[Dict[str, Any]]:
         """
         results = []
         for row in client.query(query).result():
-            results.append({
-                "column_name": row.column_name,
-                "data_type": row.data_type,
-                "is_nullable": row.is_nullable,
-            })
+            results.append(
+                {
+                    "column_name": row.column_name,
+                    "data_type": row.data_type,
+                    "is_nullable": row.is_nullable,
+                }
+            )
         return results
 
     except Exception as e:
