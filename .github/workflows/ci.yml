@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Opt into Node.js 24 runtime for JavaScript actions ahead of the June 2026
+# forced cutover (https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
+# actions/checkout@v4 and actions/setup-python@v5 ship on Node 20 and will be
+# upgraded transparently once the runner switches.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
