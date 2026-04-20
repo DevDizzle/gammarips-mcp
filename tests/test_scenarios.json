@@ -75,7 +75,7 @@
     "id": "T12_1",
     "tool": "run_price_query",
     "query": "What was the close price of AAPL on 2024-01-05?",
-    "params": {"query": "SELECT adj_close FROM `profitscout-lx6bb.profit_scout.price_data` WHERE ticker = 'AAPL' AND date = '2024-01-05'"}
+    "params": {"query": "SELECT adj_close FROM `profitscout-fida8.profit_scout.price_data` WHERE ticker = 'AAPL' AND date = '2024-01-05'"}
   },
   {
     "id": "T13_1",

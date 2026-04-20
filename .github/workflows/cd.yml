@@ -13,7 +13,7 @@ env:
   # forced cutover. See:
   # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-  PROJECT_ID: profitscout-lx6bb
+  PROJECT_ID: profitscout-fida8
   REGION: us-central1
   SERVICE: gammarips-mcp
   REPOSITORY: gammarips-mcp
