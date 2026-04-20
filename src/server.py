@@ -313,7 +313,7 @@ def get_tools_list():
         },
         {
             "name": "get_open_position",
-            "description": "Returns currently-open V5.3 paper positions from forward_paper_ledger with live Polygon option prices and unrealized P&L. Use this to answer 'am I in a trade right now?' and 'what's it worth?' questions. Returns a list — possibly empty if no position is open. Fields: ticker, direction, recommended_contract, entry_price, target_price, stop_price, current_mid, unrealized_return_pct, days_since_entry, scan_date.",
+            "description": "Returns the current V5.3 trade status in three pieces so a chat agent can answer 'what trade am I in right now?' honestly. IMPORTANT: the paper-trader is a BATCH simulator — it does not hold live positions in the ledger. This tool returns {pending_pick (from Firestore todays_pick — the next trade to enter at 10:00 ET), awaiting_simulation (scan_dates still inside their 3-day hold window awaiting reconciliation), most_recent_closed_trade (last ledger row with real entry + exit), explanation (plain-English narrative)}.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -322,12 +322,12 @@ def get_tools_list():
                 "readOnlyHint": True,
                 "destructiveHint": False,
                 "idempotentHint": True,
-                "openWorldHint": True
+                "openWorldHint": False
             }
         },
         {
             "name": "get_position_history",
-            "description": "Returns realized (closed) V5.3 paper trades from the last N days, row-level, for chat-agent answers like 'show me recent wins/losses'. PIT-safe: only rows where exit_timestamp IS NOT NULL and DATE(exit_timestamp) < today.",
+            "description": "Returns realized (closed) V5.3 paper trades from the last N days, row-level, for chat-agent answers like 'show me recent wins/losses'. Filters out INVALID_LIQUIDITY rows (contracts with no bars at 10:00 ET day-1 — terminal but uninformative). PIT-safe: only rows where exit_timestamp IS NOT NULL and DATE(exit_timestamp) < today.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

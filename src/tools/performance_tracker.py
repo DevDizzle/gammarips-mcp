@@ -227,79 +227,158 @@ def get_win_rate_summary(
         return {"error": str(e)}
 
 
-def get_open_position() -> List[Dict[str, Any]]:
+def get_open_position() -> Dict[str, Any]:
     """
-    Returns currently-open V5.3 paper positions from forward_paper_ledger
-    with live Polygon option prices and unrealized P&L. An "open" position is
-    a ledger row where exit_timestamp IS NULL and scan_date is within the last
-    ~5 trading days (longer than the 3-day hold window to be safe).
+    Returns the current V5.3 trade status across three surfaces that together
+    answer 'what trade am I in right now?' for a chat agent.
+
+    IMPORTANT — the forward-paper-trader is a BATCH simulator that only writes
+    ledger rows AFTER the 3-day hold window closes. There is no "currently-open
+    position" in the ledger by design; every ledger row is terminal. Instead of
+    inventing one, this tool returns three orthogonal pieces the chat agent can
+    narrate:
+
+      1. pending_pick — the signal-notifier's most recent decision from Firestore
+         `todays_pick/{scan_date}`. This is the next trade that will be entered
+         at 10:00 ET the following trading day (if has_pick=true), or a skip
+         with reason if the V5.3 gates didn't clear.
+      2. awaiting_simulation — scan_dates between the last simulated scan and
+         today that are still inside their 3-day hold window and have NOT yet
+         been reconciled into the ledger.
+      3. most_recent_closed_trade — the latest ledger row with a real entry fill
+         and a real exit. Gives the chat agent something concrete to reference
+         when a user asks 'how did the last one do?'
 
     Returns:
-        List of {ticker, direction, recommended_contract, entry_price,
-                 target_price, stop_price, current_mid, unrealized_return_pct,
-                 days_since_entry, scan_date, entry_timestamp}. Empty list
-        if there are no open positions. If POLYGON_API_KEY is unavailable,
-        current_mid and unrealized_return_pct will be null.
+        {
+          "explanation": str,                    # plain-English summary the
+                                                 # chat agent can paraphrase
+          "pending_pick": {...} | None,          # from Firestore todays_pick
+          "awaiting_simulation": [scan_date,...],# scan_dates still in hold
+          "most_recent_closed_trade": {...} | None,
+        }
     """
     if not client:
-        return [{"error": "BigQuery client not initialized"}]
+        return {"error": "BigQuery client not initialized"}
 
+    result: Dict[str, Any] = {
+        "explanation": None,
+        "pending_pick": None,
+        "awaiting_simulation": [],
+        "most_recent_closed_trade": None,
+    }
+
+    # --- 1. pending_pick from Firestore todays_pick/{latest scan_date} ---
     try:
-        # An "open position" is a ledger row with an ACTUAL entry fill
-        # (entry_price IS NOT NULL) that has not yet closed. Stale stubs
-        # where entry never happened are excluded — they're not live trades.
-        query = """
+        from google.cloud import firestore as _fs  # local to avoid hard coupling
+        fs = _fs.Client(project="profitscout-fida8")
+        docs = list(
+            fs.collection("todays_pick")
+            .order_by("scan_date", direction=_fs.Query.DESCENDING)
+            .limit(1)
+            .stream()
+        )
+        if docs:
+            d = docs[0].to_dict() or {}
+            for k, v in list(d.items()):
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+            result["pending_pick"] = d
+    except Exception as e:
+        logger.warning(f"pending_pick Firestore read failed: {e}")
+
+    # --- 2. awaiting_simulation — scan_dates in enriched but not yet in ledger ---
+    try:
+        q = """
+            WITH enriched_dates AS (
+                SELECT DISTINCT scan_date
+                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+                WHERE scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 DAY)
+            ),
+            ledgered AS (
+                SELECT DISTINCT scan_date
+                FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+                WHERE scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 DAY)
+            )
+            SELECT e.scan_date
+            FROM enriched_dates e
+            LEFT JOIN ledgered l USING (scan_date)
+            WHERE l.scan_date IS NULL
+            ORDER BY e.scan_date DESC
+        """
+        result["awaiting_simulation"] = [
+            str(row.scan_date) for row in client.query(q).result()
+        ]
+    except Exception as e:
+        logger.warning(f"awaiting_simulation query failed: {e}")
+
+    # --- 3. most_recent_closed_trade (real entry + real exit, V5.3 only) ---
+    try:
+        q = """
             SELECT
-                ticker, direction, recommended_contract,
+                scan_date, ticker, direction, recommended_contract,
                 entry_price, target_price, stop_price,
-                entry_timestamp, scan_date,
+                entry_timestamp, exit_timestamp,
+                exit_reason, realized_return_pct,
+                underlying_entry_price, underlying_exit_price,
+                underlying_return, spy_return_over_window,
                 policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
-            WHERE exit_timestamp IS NULL
-              AND entry_price IS NOT NULL
-              AND IFNULL(is_skipped, FALSE) = FALSE
-              AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-            ORDER BY scan_date DESC, ticker
+            WHERE entry_price IS NOT NULL
+              AND exit_timestamp IS NOT NULL
+              AND exit_reason NOT IN ("INVALID_LIQUIDITY", "SKIPPED")
+              AND policy_version = "V5_3_TARGET_80"
+            ORDER BY exit_timestamp DESC
+            LIMIT 1
         """
-        results = []
-        for row in client.query(query).result():
+        for row in client.query(q).result():
             r = dict(row)
-            # Normalize date/timestamp for JSON.
             for k, v in list(r.items()):
                 if hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
-
-            # Enrich with live option price + unrealized P&L.
-            contract = r.get("recommended_contract")
-            entry = r.get("entry_price")
-            mid = _polygon_option_mid(contract) if contract else None
-            r["current_mid"] = mid
-            if mid is not None and entry not in (None, 0):
-                try:
-                    r["unrealized_return_pct"] = round(((mid / float(entry)) - 1) * 100, 2)
-                except Exception:
-                    r["unrealized_return_pct"] = None
-            else:
-                r["unrealized_return_pct"] = None
-
-            # Days since entry (simple calendar-day proxy).
-            from datetime import datetime, timezone as _tz
-            et = r.get("entry_timestamp")
-            if et:
-                try:
-                    dt = datetime.fromisoformat(str(et).replace("Z", "+00:00"))
-                    r["days_since_entry"] = (datetime.now(_tz.utc) - dt).days
-                except Exception:
-                    r["days_since_entry"] = None
-            else:
-                r["days_since_entry"] = None
-
-            results.append(r)
-        return results
-
+            result["most_recent_closed_trade"] = r
+            break
     except Exception as e:
-        logger.error(f"Error in get_open_position: {e}")
-        return [{"error": str(e)}]
+        logger.warning(f"most_recent_closed_trade query failed: {e}")
+
+    # --- 4. narrative explanation for the chat agent ---
+    parts = []
+    pp = result["pending_pick"]
+    if pp and pp.get("has_pick"):
+        parts.append(
+            f"Next trade: {pp.get('ticker')} {pp.get('direction')} "
+            f"({pp.get('recommended_contract')}), entry at {pp.get('effective_at')}."
+        )
+    elif pp:
+        parts.append(
+            f"No next trade — {pp.get('skip_reason') or 'no pick'} for scan {pp.get('scan_date')}."
+        )
+    else:
+        parts.append("No pending pick found in Firestore todays_pick.")
+
+    if result["awaiting_simulation"]:
+        parts.append(
+            f"{len(result['awaiting_simulation'])} scan_date(s) awaiting simulator "
+            f"reconciliation (within 3-day hold): {', '.join(result['awaiting_simulation'])}."
+        )
+
+    mr = result["most_recent_closed_trade"]
+    if mr:
+        parts.append(
+            f"Last closed trade: {mr.get('ticker')} {mr.get('direction')} on "
+            f"{mr.get('scan_date')} → {mr.get('exit_reason')} "
+            f"at {mr.get('realized_return_pct')}%."
+        )
+    else:
+        parts.append("No closed V5.3 trades yet in the ledger.")
+
+    parts.append(
+        "Reminder: the paper-trader is a batch simulator. There is no live "
+        "open position in the ledger by design."
+    )
+
+    result["explanation"] = " ".join(parts)
+    return result
 
 
 def get_position_history(
@@ -327,14 +406,24 @@ def get_position_history(
     limit = max(1, min(int(limit), 200))
 
     try:
+        # Columns verified against BQ INFORMATION_SCHEMA on 2026-04-20 — there is
+        # no `exit_price` column; the ledger encodes outcome via realized_return_pct
+        # on the option premium and underlying_exit_price on the stock leg.
+        # Also exclude INVALID_LIQUIDITY rows (contract had zero bars at 10:00 ET
+        # day-1 so entry_price is NULL — these are terminal but uninformative).
         query = """
             SELECT
                 scan_date, ticker, direction, recommended_contract,
-                entry_price, exit_price, realized_return_pct,
-                exit_reason, entry_timestamp, exit_timestamp, policy_version
+                entry_price, target_price, stop_price,
+                realized_return_pct, exit_reason,
+                underlying_entry_price, underlying_exit_price, underlying_return,
+                spy_return_over_window,
+                entry_timestamp, exit_timestamp, policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
             WHERE exit_timestamp IS NOT NULL
               AND DATE(exit_timestamp) < CURRENT_DATE()
+              AND entry_price IS NOT NULL
+              AND exit_reason NOT IN ("INVALID_LIQUIDITY", "SKIPPED")
               AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
               AND IFNULL(is_skipped, FALSE) = FALSE
             ORDER BY exit_timestamp DESC
