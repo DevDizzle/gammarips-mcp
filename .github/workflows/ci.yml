@@ -6,10 +6,10 @@ on:
   pull_request:
     branches: [main]
 
-# Opt into Node.js 24 runtime for JavaScript actions ahead of the June 2026
-# forced cutover (https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/).
-# actions/checkout@v4 and actions/setup-python@v5 ship on Node 20 and will be
-# upgraded transparently once the runner switches.
+# Actions pinned to majors that are Node.js 24 native (checkout v6, setup-python v6).
+# FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 is kept as a defensive belt-and-suspenders in
+# case a future action version regresses; harmless when everything is already Node 24.
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -19,10 +19,10 @@ jobs:
 
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Python 3.12
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12'
 
