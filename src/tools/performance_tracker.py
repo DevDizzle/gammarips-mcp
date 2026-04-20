@@ -103,7 +103,9 @@ def get_signal_performance(
             query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
 
         if direction:
-            base_query += " AND LOWER(direction) = LOWER(@direction)"
+            # Prefix match — callers pass "bull"/"bear" but stored values are
+            # "BULLISH"/"BEARISH". Exact LOWER()==LOWER() silently returned [].
+            base_query += " AND LOWER(direction) LIKE LOWER(@direction) || '%'"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
 
         if outcome:

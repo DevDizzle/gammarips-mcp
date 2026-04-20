@@ -37,6 +37,7 @@ from tools.overnight_signals import (
     get_overnight_signals,
     get_signal_detail,
     get_todays_pick,
+    list_todays_picks,
 )
 from tools.performance_tracker import (
     get_open_position,
@@ -52,6 +53,7 @@ mcp.tool()(get_overnight_signals)
 mcp.tool()(get_enriched_signals)
 mcp.tool()(get_signal_detail)
 mcp.tool()(get_todays_pick)
+mcp.tool()(list_todays_picks)
 mcp.tool()(get_freemium_preview)
 mcp.tool()(get_signal_performance)
 mcp.tool()(get_win_rate_summary)
@@ -153,8 +155,28 @@ def get_tools_list():
             },
         },
         {
+            "name": "list_todays_picks",
+            "description": "Enumerate the last N days of canonical V5.3 picks from Firestore. Unlike get_todays_pick (latest only), this returns a list so an agent can answer 'compare today's pick to last week's' or 'show me the last 5 picks.' Includes skip-reason entries (vix_backwardation, no_candidates_passed_gates, etc) so users see no-trade days too. Returns narrow fields (ticker, direction, contract, skip_reason, scan_date); use get_todays_pick for a single full payload.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "default": 7,
+                        "description": "Lookback window in days (clamped 1-30)",
+                    }
+                },
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        },
+        {
             "name": "get_signal_performance",
-            "description": "Track how signals actually performed against market outcomes.",
+            "description": "How signals performed against 3-day forward returns. READS FROM `signal_performance` (enriched-signals outcome table, ~30 signals/day tracked). This is NOT the V5.3 paper-trader ledger — for realized V5.3 bracket trades use get_position_history. For aggregates use get_win_rate_summary.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -182,7 +204,7 @@ def get_tools_list():
         },
         {
             "name": "get_win_rate_summary",
-            "description": "Aggregate performance statistics (win rate, average return).",
+            "description": "Aggregate win rate + average return over N days. READS FROM `signal_performance` (enriched-signals outcome table) — NOT the V5.3 paper-trader ledger. These are two different universes: enriched-signals track ALL signals that cleared enrichment (~30/day, 3-day forward returns, typical 80%+ win rate), while V5.3 realized trades are one pick per day with a −60/+80 bracket. Always disambiguate in chat answers. For V5.3 realized trades, chain get_position_history.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -302,7 +324,7 @@ def get_tools_list():
         },
         {
             "name": "get_position_history",
-            "description": "Returns realized (closed) V5.3 paper trades from the last N days, row-level, for chat-agent answers like 'show me recent wins/losses'. Filters out INVALID_LIQUIDITY rows (contracts with no bars at 10:00 ET day-1 — terminal but uninformative). PIT-safe: only rows where exit_timestamp IS NOT NULL and DATE(exit_timestamp) < today.",
+            "description": "Realized V5.3 paper-trader bracket trades from the last N days, row-level. READS FROM `forward_paper_ledger` — this IS the V5.3 strategy (one pick per day, −60%/+80% option bracket, 3-day hold). Returns entry/exit prices, realized_return_pct, exit_reason (STOP/TARGET/TIMEOUT), plus SPY + underlying benchmark returns. Filters out INVALID_LIQUIDITY and SKIPPED. PIT-safe (exit_timestamp < today). This is the tool to chain with get_win_rate_summary when an agent needs to disambiguate enriched-outcome stats from V5.3 realized outcomes.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -368,6 +390,7 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> st
         "get_enriched_signals": get_enriched_signals,
         "get_signal_detail": get_signal_detail,
         "get_todays_pick": get_todays_pick,
+        "list_todays_picks": list_todays_picks,
         "get_freemium_preview": get_freemium_preview,
         "get_signal_performance": get_signal_performance,
         "get_win_rate_summary": get_win_rate_summary,

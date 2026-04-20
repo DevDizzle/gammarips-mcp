@@ -68,7 +68,9 @@ def get_overnight_signals(
         query_params = [bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
 
         if direction:
-            base_query += " AND LOWER(direction) = LOWER(@direction)"
+            # Prefix match — callers pass "bull"/"bear" but stored values are
+            # "BULLISH"/"BEARISH". Exact LOWER()==LOWER() silently returned [].
+            base_query += " AND LOWER(direction) LIKE LOWER(@direction) || '%'"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
 
         if min_score > 0:
@@ -145,7 +147,9 @@ def get_enriched_signals(
         query_params = [bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date)]
 
         if direction:
-            base_query += " AND LOWER(direction) = LOWER(@direction)"
+            # Prefix match — callers pass "bull"/"bear" but stored values are
+            # "BULLISH"/"BEARISH". Exact LOWER()==LOWER() silently returned [].
+            base_query += " AND LOWER(direction) LIKE LOWER(@direction) || '%'"
             query_params.append(bigquery.ScalarQueryParameter("direction", "STRING", direction))
 
         if ticker:
@@ -349,4 +353,65 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"Error in get_freemium_preview: {e}")
+        return [{"error": str(e)}]
+
+
+def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
+    """
+    Enumerate the last N days of canonical V5.3 picks from Firestore todays_pick/*.
+
+    Unlike get_todays_pick (which returns only the latest doc), this tool returns a
+    chronological list so the chat agent can answer "compare today's pick to last
+    week's" or "show me the last 5 picks." Includes skip-reason entries so users
+    see the "no pick today because VIX backwardation" days too.
+
+    Args:
+        days: Lookback window in days (default 7, clamped 1-30).
+
+    Returns:
+        List of {scan_date, has_pick, ticker?, direction?, recommended_contract?,
+                 skip_reason?, effective_at?, decided_at, policy_version},
+        ordered by scan_date DESC (most recent first).
+    """
+    if not fs_client:
+        return [{"error": "Firestore client not initialized"}]
+
+    days = max(1, min(int(days), 30))
+
+    try:
+        from datetime import date, timedelta
+
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+
+        q = (
+            fs_client.collection("todays_pick")
+            .where("scan_date", ">=", cutoff)
+            .order_by("scan_date", direction=firestore.Query.DESCENDING)
+        )
+
+        results = []
+        for doc in q.stream():
+            d = doc.to_dict() or {}
+            # Normalize timestamps to ISO8601 for JSON serialization.
+            for k, v in list(d.items()):
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+            # Narrow the payload — full per-pick detail is available via get_todays_pick.
+            results.append(
+                {
+                    "scan_date": d.get("scan_date"),
+                    "has_pick": d.get("has_pick"),
+                    "ticker": d.get("ticker"),
+                    "direction": d.get("direction"),
+                    "recommended_contract": d.get("recommended_contract"),
+                    "skip_reason": d.get("skip_reason"),
+                    "effective_at": d.get("effective_at"),
+                    "decided_at": d.get("decided_at"),
+                    "policy_version": d.get("policy_version"),
+                }
+            )
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in list_todays_picks: {e}")
         return [{"error": str(e)}]
