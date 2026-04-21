@@ -1,20 +1,35 @@
 {
-  "name": "GammaRips Overnight Edge",
-  "description": "Free institutional overnight options flow scanner. Query pre-market signals, flow data, technicals, and AI-analyzed catalysts for 5,230+ tickers. No API key required.",
+  "name": "GammaRips",
+  "description": "One options trade a day, scored before you wake up. Free MCP endpoint exposing 15 tools over the V5.3 paper-trading engine. Paper-trading, educational only. Not investment advice.",
   "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
-  "auth": {
-    "type": "none"
-  },
+  "auth": { "type": "none" },
   "tools": [
     "get_overnight_signals",
     "get_enriched_signals",
     "get_signal_detail",
+    "get_todays_pick",
+    "list_todays_picks",
+    "get_freemium_preview",
     "get_signal_performance",
     "get_win_rate_summary",
+    "get_open_position",
+    "get_position_history",
     "get_daily_report",
     "get_report_list",
     "get_available_dates",
+    "get_enriched_signal_schema",
     "web_search"
   ],
-  "tags": ["options", "institutional-flow", "overnight", "pre-market", "signals", "AI", "free"]
+  "primary_tool": "get_todays_pick",
+  "publication_time": "09:00 ET weekdays",
+  "universe": "5,230 US equities",
+  "tags": ["options", "institutional-flow", "overnight", "paper-trading", "signals", "mcp", "free"],
+  "links": {
+    "home": "https://gammarips.com",
+    "pricing": "https://gammarips.com/pricing",
+    "developers": "https://gammarips.com/developers",
+    "llms_txt": "https://gammarips.com/llms.txt"
+  },
+  "creator": { "name": "GammaRips", "url": "https://gammarips.com" },
+  "license": "https://gammarips.com/terms"
 }
