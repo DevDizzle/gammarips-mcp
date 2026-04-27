@@ -10,8 +10,10 @@ dependencies = [
     "google-cloud-storage>=2.10.0",
     "google-cloud-firestore>=2.11.0",
     "httpx>=0.24.0",
+    "pandas-market-calendars>=4.4.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]

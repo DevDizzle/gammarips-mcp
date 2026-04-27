@@ -3,7 +3,13 @@ import os
 
 import requests
 
+from utils.safety import clamp, safe_error
+
 logger = logging.getLogger(__name__)
+
+# Caller-supplied query strings hit a paid Google Custom Search API. Cap the
+# query length to defend against memory-amplification + cost attacks.
+_MAX_QUERY_LEN = 500
 
 
 def web_search(query: str, num_results: int = 5) -> str:
@@ -24,12 +30,16 @@ def web_search(query: str, num_results: int = 5) -> str:
     if not api_key or not cse_id:
         return "Error: GOOGLE_API_KEY or GOOGLE_CSE_ID not configured in environment."
 
+    # Bound caller-controlled inputs before they reach the paid Google CSE API.
+    query = (query or "")[:_MAX_QUERY_LEN]
+    num = clamp(num_results, 1, 10, default=5)
+
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
         "key": api_key,
         "cx": cse_id,
         "q": query,
-        "num": min(num_results, 10),  # API limit is 10
+        "num": num,
     }
 
     try:
@@ -62,8 +72,6 @@ def web_search(query: str, num_results: int = 5) -> str:
         return "\n---\n".join(formatted_results)
 
     except requests.exceptions.RequestException as e:
-        logger.error(f"Web Search Network Error: {e}")
-        return f"Error performing web search: {str(e)}"
+        return safe_error(e, "web_search")
     except Exception as e:
-        logger.error(f"Web Search Unexpected Error: {e}")
-        return f"Error performing web search: {str(e)}"
+        return safe_error(e, "web_search")

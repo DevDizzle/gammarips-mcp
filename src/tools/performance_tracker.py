@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 from google.cloud import bigquery
 
+from utils.safety import clamp, safe_error
+
 logger = logging.getLogger(__name__)
 
 # Initialize client
@@ -82,6 +84,8 @@ def get_signal_performance(
     if not client:
         return [{"error": "BigQuery client not initialized"}]
 
+    limit = clamp(limit, 1, 50, default=50)
+
     try:
         # scan_date is STRING in this table
         base_query = """
@@ -130,8 +134,7 @@ def get_signal_performance(
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_signal_performance: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_signal_performance")}]
 
 
 def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
@@ -146,6 +149,8 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
+
+    days = clamp(days, 1, 365, default=30)
 
     try:
         # Calculate start date based on days lookback
@@ -223,8 +228,7 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
         return result
 
     except Exception as e:
-        logger.error(f"Error in get_win_rate_summary: {e}")
-        return {"error": str(e)}
+        return {"error": safe_error(e, "get_win_rate_summary")}
 
 
 def get_open_position() -> dict[str, Any]:
@@ -402,7 +406,8 @@ def get_position_history(
     if not client:
         return [{"error": "BigQuery client not initialized"}]
 
-    limit = max(1, min(int(limit), 200))
+    days = clamp(days, 1, 365, default=30)
+    limit = clamp(limit, 1, 200, default=50)
 
     try:
         # Columns verified against BQ INFORMATION_SCHEMA on 2026-04-20 — there is
@@ -445,5 +450,4 @@ def get_position_history(
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_position_history: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_position_history")}]

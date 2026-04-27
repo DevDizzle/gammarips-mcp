@@ -7,6 +7,8 @@ from typing import Any
 
 from google.cloud import firestore
 
+from utils.safety import clamp, safe_error
+
 logger = logging.getLogger(__name__)
 
 # Initialize client
@@ -48,8 +50,7 @@ def get_daily_report(date: str | None = None) -> dict[str, Any]:
             return {"error": "No reports found"}
 
     except Exception as e:
-        logger.error(f"Error in get_daily_report: {e}")
-        return {"error": str(e)}
+        return {"error": safe_error(e, "get_daily_report")}
 
 
 def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
@@ -64,6 +65,8 @@ def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
     """
     if not db:
         return [{"error": "Firestore client not initialized"}]
+
+    limit = clamp(limit, 1, 30, default=10)
 
     try:
         reports_ref = db.collection("daily_reports")
@@ -83,5 +86,4 @@ def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_report_list: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_report_list")}]

@@ -7,6 +7,8 @@ from typing import Any
 
 from google.cloud import bigquery, firestore
 
+from utils.safety import clamp, safe_error
+
 logger = logging.getLogger(__name__)
 
 # Initialize clients
@@ -35,6 +37,9 @@ def get_overnight_signals(
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
+
+    limit = clamp(limit, 1, 50, default=50)
+    min_score = clamp(min_score, 0, 10, default=0)
 
     try:
         # Determine scan_date if not provided
@@ -101,8 +106,7 @@ def get_overnight_signals(
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_overnight_signals: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_overnight_signals")}]
 
 
 def get_enriched_signals(
@@ -123,6 +127,8 @@ def get_enriched_signals(
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
+
+    limit = clamp(limit, 1, 50, default=25)
 
     try:
         # Determine scan_date if not provided
@@ -177,8 +183,7 @@ def get_enriched_signals(
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_enriched_signals: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_enriched_signals")}]
 
 
 def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, Any]:
@@ -244,8 +249,7 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
         return result
 
     except Exception as e:
-        logger.error(f"Error in get_signal_detail: {e}")
-        return {"error": str(e)}
+        return {"error": safe_error(e, "get_signal_detail")}
 
 
 def get_todays_pick(scan_date: str | None = None) -> dict[str, Any]:
@@ -297,8 +301,7 @@ def get_todays_pick(scan_date: str | None = None) -> dict[str, Any]:
         return data
 
     except Exception as e:
-        logger.error(f"Error in get_todays_pick: {e}")
-        return {"error": str(e)}
+        return {"error": safe_error(e, "get_todays_pick")}
 
 
 def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
@@ -318,7 +321,7 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
     if not client:
         return [{"error": "BigQuery client not initialized"}]
 
-    limit = max(1, min(int(limit), 20))
+    limit = clamp(limit, 1, 20, default=5)
 
     try:
         query = """
@@ -352,8 +355,7 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
         return results
 
     except Exception as e:
-        logger.error(f"Error in get_freemium_preview: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "get_freemium_preview")}]
 
 
 def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
@@ -376,7 +378,7 @@ def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
     if not fs_client:
         return [{"error": "Firestore client not initialized"}]
 
-    days = max(1, min(int(days), 30))
+    days = clamp(days, 1, 30, default=7)
 
     try:
         from datetime import date, timedelta
@@ -413,5 +415,4 @@ def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
         return results
 
     except Exception as e:
-        logger.error(f"Error in list_todays_picks: {e}")
-        return [{"error": str(e)}]
+        return [{"error": safe_error(e, "list_todays_picks")}]

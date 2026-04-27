@@ -16,6 +16,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from utils.safety import RateLimitMiddleware
+
 # Load environment variables
 load_dotenv()
 
@@ -30,6 +32,8 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
 # Import tools
+from tools.education import get_market_calendar_status, get_signal_explainer
+from tools.historical import get_historical_performance
 from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.overnight_signals import (
     get_enriched_signals,
@@ -64,6 +68,9 @@ mcp.tool()(get_report_list)
 mcp.tool()(get_available_dates)
 mcp.tool()(get_enriched_signal_schema)
 mcp.tool()(web_search)
+mcp.tool()(get_market_calendar_status)
+mcp.tool()(get_signal_explainer)
+mcp.tool()(get_historical_performance)
 
 
 def get_tools_list():
@@ -380,6 +387,66 @@ def get_tools_list():
                 "openWorldHint": True,
             },
         },
+        {
+            "name": "get_market_calendar_status",
+            "description": "Returns whether the US equity market is open today, the next open/close, and holiday status. Uses NYSE calendar (pandas_market_calendars). Eliminates the chat-agent 'is the market open?' hallucination class.",
+            "inputSchema": {"type": "object", "properties": {}},
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        },
+        {
+            "name": "get_signal_explainer",
+            "description": "Plain-English explanation of a GammaRips signal field (e.g., premium_score, volume_oi_ratio, moneyness_pct, recommended_contract). Hardcoded lookup, no LLM, no hallucination. Use when a chat user asks 'what does X mean?' about a metric in any other tool's response.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "field_name": {
+                        "type": "string",
+                        "description": "Field name as it appears in tool responses (e.g. 'premium_score').",
+                    }
+                },
+                "required": ["field_name"],
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        },
+        {
+            "name": "get_historical_performance",
+            "description": "Aggregate V5.3 paper-trader performance over a lookback window. READS FROM `forward_paper_ledger` (V5.3 realized bracket trades) — NOT signal_performance. Use this when a user asks 'how has GammaRips' STRATEGY performed?'. Returns total_trades, wins, losses, win_rate, avg_return, median_return, best, worst.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "lookback_days": {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Lookback window in calendar days (clamped 1-365).",
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["bullish", "bearish"],
+                        "description": "Optional: filter to bullish or bearish trades.",
+                    },
+                    "min_premium_score": {
+                        "type": "integer",
+                        "description": "Optional: minimum premium_score floor (0-10).",
+                    },
+                },
+            },
+            "annotations": {
+                "readOnlyHint": True,
+                "destructiveHint": False,
+                "idempotentHint": True,
+                "openWorldHint": False,
+            },
+        },
     ]
 
 
@@ -401,6 +468,9 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> st
         "get_available_dates": get_available_dates,
         "get_enriched_signal_schema": get_enriched_signal_schema,
         "web_search": web_search,
+        "get_market_calendar_status": get_market_calendar_status,
+        "get_signal_explainer": get_signal_explainer,
+        "get_historical_performance": get_historical_performance,
     }
 
     if tool_name not in tool_map:
@@ -596,6 +666,15 @@ try:
     # Add middleware
     app.add_middleware(RequestLogger)
 
+    # Per-IP token-bucket rate limiter — defends the paid Google CSE tool
+    # and BQ cost surface against unauthenticated abuse. Limits are
+    # generous: 60 req/min default, 10 req/min for web_search.
+    app.add_middleware(
+        RateLimitMiddleware,
+        default_per_min=int(os.getenv("RATE_LIMIT_DEFAULT_PER_MIN", "60")),
+        web_search_per_min=int(os.getenv("RATE_LIMIT_SEARCH_PER_MIN", "10")),
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # Open for maximum distribution
@@ -663,16 +742,20 @@ def main():
     logger.info("   2. get_enriched_signals")
     logger.info("   3. get_signal_detail")
     logger.info("   4. get_todays_pick        (V5.3 canonical pick)")
-    logger.info("   5. get_freemium_preview   (V5.3 top-N teaser)")
-    logger.info("   6. get_signal_performance")
-    logger.info("   7. get_win_rate_summary")
-    logger.info("   8. get_open_position      (V5.3 live position + Polygon mid)")
-    logger.info("   9. get_position_history   (V5.3 realized ledger)")
-    logger.info("  10. get_daily_report")
-    logger.info("  11. get_report_list")
-    logger.info("  12. get_available_dates")
-    logger.info("  13. get_enriched_signal_schema")
-    logger.info("  14. web_search")
+    logger.info("   5. list_todays_picks")
+    logger.info("   6. get_freemium_preview   (V5.3 top-N teaser)")
+    logger.info("   7. get_signal_performance")
+    logger.info("   8. get_win_rate_summary")
+    logger.info("   9. get_open_position      (V5.3 live position + Polygon mid)")
+    logger.info("  10. get_position_history   (V5.3 realized ledger)")
+    logger.info("  11. get_daily_report")
+    logger.info("  12. get_report_list")
+    logger.info("  13. get_available_dates")
+    logger.info("  14. get_enriched_signal_schema")
+    logger.info("  15. web_search")
+    logger.info("  16. get_market_calendar_status   (NEW 2026-04-27)")
+    logger.info("  17. get_signal_explainer         (NEW 2026-04-27)")
+    logger.info("  18. get_historical_performance   (NEW 2026-04-27 — V5.3 ledger aggregate)")
     logger.info("")
     logger.info("Starting server...")
 
