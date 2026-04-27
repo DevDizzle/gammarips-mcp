@@ -76,9 +76,7 @@ def get_historical_performance(
         elif d.startswith("bear"):
             dir_filter = "BEARISH"
         else:
-            return {
-                "error": f"direction must be 'bullish' or 'bearish' (got '{direction}')"
-            }
+            return {"error": f"direction must be 'bullish' or 'bearish' (got '{direction}')"}
 
     score_filter: int | None = None
     if min_premium_score is not None:
@@ -109,7 +107,10 @@ def get_historical_performance(
             query_parts.append(" AND IFNULL(premium_score, 0) >= @min_score")
             params.append(bigquery.ScalarQueryParameter("min_score", "INT64", score_filter))
 
-        query = "\n".join(query_parts) + "\n            ORDER BY exit_timestamp DESC\n            LIMIT 500"
+        query = (
+            "\n".join(query_parts)
+            + "\n            ORDER BY exit_timestamp DESC\n            LIMIT 500"
+        )
 
         job = client.query(query, job_config=bigquery.QueryJobConfig(query_parameters=params))
         rows = list(job.result())

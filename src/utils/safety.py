@@ -17,6 +17,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import defaultdict
+from threading import Lock
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +97,6 @@ def clamp(value, lo: int, hi: int, default: int | None = None) -> int:
 # If we ever scale to N replicas this becomes a per-replica budget which is
 # acceptable for a free public MCP; cost-attack defense is the goal, not
 # precision SLAs.
-
-import time
-from collections import defaultdict
-from threading import Lock
-
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
 
 
 class _Bucket:

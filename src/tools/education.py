@@ -8,7 +8,7 @@ These are the chat-agent's "ask a dumb question" surface — strict-deterministi
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -92,9 +92,7 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
     "otm_pct": {
         "label": "OTM %",
         "definition": "How far out-of-the-money the strike is, in percent. Synonym for moneyness_pct.",
-        "how_used": (
-            "V5.3 signal-notifier requires 5% ≤ moneyness ≤ 15%."
-        ),
+        "how_used": ("V5.3 signal-notifier requires 5% ≤ moneyness ≤ 15%."),
     },
     "recommended_contract": {
         "label": "Recommended Contract",
@@ -134,8 +132,7 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
     "recommended_mid_price": {
         "label": "Recommended Mid Price",
         "definition": (
-            "(bid + ask) / 2 of the recommended contract at the moment of "
-            "enrichment (~05:30 ET)."
+            "(bid + ask) / 2 of the recommended contract at the moment of enrichment (~05:30 ET)."
         ),
         "how_used": (
             "Display-only. The paper-trader DOES NOT use this for entry — it "
@@ -244,6 +241,7 @@ def get_signal_explainer(field_name: str) -> dict[str, Any]:
 # get_market_calendar_status
 # ---------------------------------------------------------------------------
 
+
 def get_market_calendar_status() -> dict[str, Any]:
     """
     Returns whether the US equity market is open today + the next open/close.
@@ -300,9 +298,7 @@ def get_market_calendar_status() -> dict[str, Any]:
                     # named holidays via `nyse.special_dates()` which returns a
                     # DataFrame with `name` column.
                     try:
-                        special = nyse.special_dates(
-                            "holidays", start_date=start, end_date=end
-                        )
+                        special = nyse.special_dates("holidays", start_date=start, end_date=end)
                         match = special[special.index == today_np]
                         if not match.empty:
                             holiday_name = str(match.iloc[0])
@@ -328,10 +324,10 @@ def get_market_calendar_status() -> dict[str, Any]:
         next_open_utc = None
         next_close_utc = None
         is_early_close = False
-        for ts, row in sched.iterrows():
-            mo = row["market_open"].to_pydatetime().astimezone(timezone.utc)
-            mc = row["market_close"].to_pydatetime().astimezone(timezone.utc)
-            now_utc = now_et.astimezone(timezone.utc)
+        for _ts, row in sched.iterrows():
+            mo = row["market_open"].to_pydatetime().astimezone(UTC)
+            mc = row["market_close"].to_pydatetime().astimezone(UTC)
+            now_utc = now_et.astimezone(UTC)
             if next_open_utc is None and mo > now_utc:
                 next_open_utc = mo
             if next_close_utc is None and mc > now_utc:
