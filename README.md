@@ -17,16 +17,16 @@ GammaRips exposes a free hosted MCP server for querying overnight options-flow s
 - `get_overnight_signals` — raw overnight scanner output by date, direction, ticker, or minimum score
 - `get_enriched_signals` — AI-enriched high-conviction setups with technical and catalyst context
 - `get_signal_detail` — deep dive on one ticker's signal
-- `get_todays_pick` — V5.3 canonical daily pick (Firestore)
+- `get_todays_pick` — V6 canonical daily pick (Firestore)
 - `list_todays_picks` — last N days of canonical picks (includes skip-reason days)
 - `get_freemium_preview` — top-N enriched signals, narrow fields (public/teaser)
 
 ### Performance / history
 - `get_signal_performance` — outcome tracking from `signal_performance` (~30 signals/day)
 - `get_win_rate_summary` — aggregate win rate from `signal_performance`
-- `get_open_position` — current V5.3 trade status (pending pick, awaiting sim, last close)
-- `get_position_history` — V5.3 realized bracket trades from `forward_paper_ledger`
-- **`get_historical_performance`** — V5.3 ledger aggregate over a lookback (NEW 2026-04-27)
+- `get_open_position` — current V6 trade status (pending pick, awaiting sim, last close)
+- `get_position_history` — V6 realized bracket trades from `forward_paper_ledger`
+- **`get_historical_performance`** — V6 ledger aggregate over a lookback (NEW 2026-04-27)
 
 ### Reports & metadata
 - `get_daily_report` — latest full daily intelligence report

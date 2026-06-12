@@ -112,7 +112,7 @@ def get_tools_list():
         },
         {
             "name": "get_enriched_signals",
-            "description": "Returns AI-enriched overnight signals for a scan_date (news, technicals, catalyst, recommended contract). V5.3 enrichment gate is `overnight_score >= 1`, spread <= 10%, directional UOA > $500K. This tool returns all rows cleared by that gate — the single daily tradeable pick comes from `get_todays_pick`.",
+            "description": "Returns AI-enriched overnight signals for a scan_date (news, technicals, catalyst, recommended contract). The V6 enrichment gate is `overnight_score >= 4` and directional UOA > $500K. This tool returns all rows cleared by that gate — the single daily tradeable pick comes from `get_todays_pick`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -163,7 +163,7 @@ def get_tools_list():
         },
         {
             "name": "list_todays_picks",
-            "description": "Enumerate the last N days of canonical V5.3 picks from Firestore. Unlike get_todays_pick (latest only), this returns a list so an agent can answer 'compare today's pick to last week's' or 'show me the last 5 picks.' Includes skip-reason entries (vix_backwardation, no_candidates_passed_gates, etc) so users see no-trade days too. Returns narrow fields (ticker, direction, contract, skip_reason, scan_date); use get_todays_pick for a single full payload.",
+            "description": "Enumerate the last N days of canonical V6 picks from Firestore. Unlike get_todays_pick (latest only), this returns a list so an agent can answer 'compare today's pick to last week's' or 'show me the last 5 picks.' Includes skip-reason entries (vix_backwardation, no_candidates_passed_gates, etc) so users see no-trade days too. Returns narrow fields (ticker, direction, contract, skip_reason, scan_date); use get_todays_pick for a single full payload.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -183,7 +183,7 @@ def get_tools_list():
         },
         {
             "name": "get_signal_performance",
-            "description": "How signals performed against 3-day forward returns. READS FROM `signal_performance` (enriched-signals outcome table, ~30 signals/day tracked). This is NOT the V5.3 paper-trader ledger — for realized V5.3 bracket trades use get_position_history. For aggregates use get_win_rate_summary.",
+            "description": "How signals performed against 3-day forward returns. READS FROM `signal_performance` (enriched-signals outcome table, ~30 signals/day tracked). This is NOT the V6 paper-trader ledger — for realized V6 bracket trades use get_position_history. For aggregates use get_win_rate_summary.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -211,7 +211,7 @@ def get_tools_list():
         },
         {
             "name": "get_win_rate_summary",
-            "description": "Aggregate win rate + average return over N days. READS FROM `signal_performance` (enriched-signals outcome table) — NOT the V5.3 paper-trader ledger. These are two different universes: enriched-signals track ALL signals that cleared enrichment (~30/day, 3-day forward returns, typical 80%+ win rate), while V5.3 realized trades are one pick per day with a −60/+80 bracket. Always disambiguate in chat answers. For V5.3 realized trades, chain get_position_history.",
+            "description": "Aggregate win rate + average return over N days. READS FROM `signal_performance` (enriched-signals outcome table) — NOT the V6 paper-trader ledger. These are two different universes: enriched-signals track ALL signals that cleared enrichment (~30/day, 3-day forward returns), while V6 realized trades are one pick per day with a −60/+80 bracket. Always disambiguate in chat answers. For V6 realized trades, chain get_position_history.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -281,7 +281,7 @@ def get_tools_list():
         },
         {
             "name": "get_todays_pick",
-            "description": "Returns GammaRips' canonical daily V5.3 pick from Firestore todays_pick/{scan_date}. This is the single source of truth for 'what did GammaRips pick today' — do NOT re-filter. Returns {has_pick, ticker, direction, recommended_contract, recommended_strike, vol_oi_ratio, moneyness_pct, vix3m_at_enrich, effective_at, policy_version, skip_reason?}. When has_pick=false, skip_reason explains why (no_candidates_passed_gates | regime_fail_closed | vix_backwardation).",
+            "description": "Returns GammaRips' canonical daily V6 pick from Firestore todays_pick/{scan_date}. This is the single source of truth for 'what did GammaRips pick today' — do NOT re-filter. Returns {has_pick, ticker, direction, recommended_contract, recommended_strike, vix3m_at_enrich, effective_at, policy_version, skip_reason?} (some legacy fields such as vol_oi_ratio and moneyness_pct may still appear for historical rows but are no longer selection gates). When has_pick=false, skip_reason explains why (no_candidates_passed_gates | regime_fail_closed | vix_backwardation).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -320,7 +320,7 @@ def get_tools_list():
         },
         {
             "name": "get_open_position",
-            "description": "Returns the current V5.3 trade status in three pieces so a chat agent can answer 'what trade am I in right now?' honestly. IMPORTANT: the paper-trader is a BATCH simulator — it does not hold live positions in the ledger. This tool returns {pending_pick (from Firestore todays_pick — the next trade to enter at 10:00 ET), awaiting_simulation (scan_dates still inside their 3-day hold window awaiting reconciliation), most_recent_closed_trade (last ledger row with real entry + exit), explanation (plain-English narrative)}.",
+            "description": "Returns the current V6 trade status in three pieces so a chat agent can answer 'what trade am I in right now?' honestly. IMPORTANT: the paper-trader is a BATCH simulator — it does not hold live positions in the ledger. This tool returns {pending_pick (from Firestore todays_pick — the next trade to enter at 10:00 ET), awaiting_simulation (scan_dates still inside their 3-day hold window awaiting reconciliation), most_recent_closed_trade (last ledger row with real entry + exit), explanation (plain-English narrative)}.",
             "inputSchema": {"type": "object", "properties": {}},
             "annotations": {
                 "readOnlyHint": True,
@@ -331,7 +331,7 @@ def get_tools_list():
         },
         {
             "name": "get_position_history",
-            "description": "Realized V5.3 paper-trader bracket trades from the last N days, row-level. READS FROM `forward_paper_ledger` — this IS the V5.3 strategy (one pick per day, −60%/+80% option bracket, 3-day hold). Returns entry/exit prices, realized_return_pct, exit_reason (STOP/TARGET/TIMEOUT), plus SPY + underlying benchmark returns. Filters out INVALID_LIQUIDITY and SKIPPED. PIT-safe (exit_timestamp < today). This is the tool to chain with get_win_rate_summary when an agent needs to disambiguate enriched-outcome stats from V5.3 realized outcomes.",
+            "description": "Realized V6 paper-trader bracket trades from the last N days, row-level. READS FROM `forward_paper_ledger` — this IS the V6 strategy (one pick per day, −60%/+80% option bracket, 3-day hold). Returns entry/exit prices, realized_return_pct, exit_reason (STOP/TARGET/TIMEOUT), plus SPY + underlying benchmark returns. Filters out INVALID_LIQUIDITY and SKIPPED. PIT-safe (exit_timestamp < today). This is the tool to chain with get_win_rate_summary when an agent needs to disambiguate enriched-outcome stats from V6 realized outcomes.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -420,7 +420,7 @@ def get_tools_list():
         },
         {
             "name": "get_historical_performance",
-            "description": "Aggregate V5.3 paper-trader performance over a lookback window. READS FROM `forward_paper_ledger` (V5.3 realized bracket trades) — NOT signal_performance. Use this when a user asks 'how has GammaRips' STRATEGY performed?'. Returns total_trades, wins, losses, win_rate, avg_return, median_return, best, worst.",
+            "description": "Aggregate V6 paper-trader performance over a lookback window. READS FROM `forward_paper_ledger` (V6 realized bracket trades) — NOT signal_performance. Use this when a user asks 'how has GammaRips' STRATEGY performed?'. Returns total_trades, wins, losses, win_rate, avg_return, median_return, best, worst.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -505,7 +505,7 @@ async def server_card(request: Request):
                 "name": "GammaRips",
                 "displayName": "GammaRips Options Intelligence",
                 "version": "1.0.0",
-                "description": "AI-powered options trading signals. Get high-conviction setups backed by fundamentals, technicals, and options flow analysis. 64% win rate across 200+ tracked signals.",
+                "description": "AI-powered options trading signals. Get high-conviction setups backed by fundamentals, technicals, and options flow analysis. Paper-trading performance is tracked publicly on the scorecard (https://gammarips.com/scorecard). Educational only; not investment advice.",
                 "homepage": "https://gammarips.com/developers",
                 "icon": "https://gammarips.com/logo.png",
             },
@@ -741,13 +741,13 @@ def main():
     logger.info("   1. get_overnight_signals")
     logger.info("   2. get_enriched_signals")
     logger.info("   3. get_signal_detail")
-    logger.info("   4. get_todays_pick        (V5.3 canonical pick)")
+    logger.info("   4. get_todays_pick        (V6 canonical pick)")
     logger.info("   5. list_todays_picks")
-    logger.info("   6. get_freemium_preview   (V5.3 top-N teaser)")
+    logger.info("   6. get_freemium_preview   (V6 top-N teaser)")
     logger.info("   7. get_signal_performance")
     logger.info("   8. get_win_rate_summary")
-    logger.info("   9. get_open_position      (V5.3 live position + Polygon mid)")
-    logger.info("  10. get_position_history   (V5.3 realized ledger)")
+    logger.info("   9. get_open_position      (V6 live position + Polygon mid)")
+    logger.info("  10. get_position_history   (V6 realized ledger)")
     logger.info("  11. get_daily_report")
     logger.info("  12. get_report_list")
     logger.info("  13. get_available_dates")
@@ -755,7 +755,7 @@ def main():
     logger.info("  15. web_search")
     logger.info("  16. get_market_calendar_status   (NEW 2026-04-27)")
     logger.info("  17. get_signal_explainer         (NEW 2026-04-27)")
-    logger.info("  18. get_historical_performance   (NEW 2026-04-27 — V5.3 ledger aggregate)")
+    logger.info("  18. get_historical_performance   (NEW 2026-04-27 — V6 ledger aggregate)")
     logger.info("")
     logger.info("Starting server...")
 
