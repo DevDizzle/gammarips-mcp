@@ -119,10 +119,12 @@ def get_enriched_signals(
     Returns AI-enriched overnight signals for a scan_date (news, technicals,
     catalyst analysis, contract recommendation).
 
-    Under V5.3, enrichment already gates on `overnight_score >= 1`, spread <= 10%,
-    and directional UOA > $500K. This tool returns ALL rows that cleared that gate
-    — not a further score filter. The final single tradeable pick is produced by
-    signal-notifier (V/OI > 2, 5-15% OTM, VIX <= VIX3M, LIMIT 1) and surfaced via
+    Under V6, enrichment already gates on `overnight_score >= 4` and directional
+    UOA > $500K. This tool returns ALL rows that cleared that gate — not a further
+    score filter. The final single tradeable pick is produced downstream: the pool
+    is hard-gated to BULLISH calls and delta edge-ranked to the top ~50, two safety
+    rails apply (no earnings inside the 3-day hold; VIX <= VIX3M), and a randomized
+    3-bracket consensus tournament picks one name (or none). It is surfaced via
     `get_todays_pick`.
     """
     if not client:
@@ -254,10 +256,10 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
 
 def get_todays_pick(scan_date: str | None = None) -> dict[str, Any]:
     """
-    Returns GammaRips' canonical daily V5.3 pick from Firestore todays_pick/{scan_date}.
+    Returns GammaRips' canonical daily V6 pick from Firestore todays_pick/{scan_date}.
 
     This is the single source of truth for "what did GammaRips pick today" —
-    written atomically by signal-notifier at ~09:00 ET. The same ticker appears
+    written atomically by signal-notifier at ~07:30 ET. The same ticker appears
     on the webapp banner, in the operator email, and (once Phase 2 ships) in the
     WhatsApp push to paid subscribers. Do NOT re-filter the result — the doc IS
     the answer.
@@ -360,7 +362,7 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
 
 def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
     """
-    Enumerate the last N days of canonical V5.3 picks from Firestore todays_pick/*.
+    Enumerate the last N days of canonical V6 picks from Firestore todays_pick/*.
 
     Unlike get_todays_pick (which returns only the latest doc), this tool returns a
     chronological list so the chat agent can answer "compare today's pick to last

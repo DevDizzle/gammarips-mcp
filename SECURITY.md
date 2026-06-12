@@ -13,7 +13,7 @@ and how to report a vulnerability.
 
 ## Trust model in one sentence
 
-The MCP server is a **public, unauthenticated, read-only API** over the V5.3
+The MCP server is a **public, unauthenticated, read-only API** over the V6
 options-flow paper-trader. It returns the same data a Smithery-listed agent or
 a curious developer could see. There is no per-user data, no PII, no
 mutation surface, and no privileged identity.

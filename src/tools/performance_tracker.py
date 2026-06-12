@@ -233,7 +233,7 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
 
 def get_open_position() -> dict[str, Any]:
     """
-    Returns the current V5.3 trade status across three surfaces that together
+    Returns the current V6 trade status across three surfaces that together
     answer 'what trade am I in right now?' for a chat agent.
 
     IMPORTANT — the forward-paper-trader is a BATCH simulator that only writes
@@ -245,7 +245,7 @@ def get_open_position() -> dict[str, Any]:
       1. pending_pick — the signal-notifier's most recent decision from Firestore
          `todays_pick/{scan_date}`. This is the next trade that will be entered
          at 10:00 ET the following trading day (if has_pick=true), or a skip
-         with reason if the V5.3 gates didn't clear.
+         with reason if the V6 gates didn't clear.
       2. awaiting_simulation — scan_dates between the last simulated scan and
          today that are still inside their 3-day hold window and have NOT yet
          been reconciled into the ledger.
@@ -315,7 +315,7 @@ def get_open_position() -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"awaiting_simulation query failed: {e}")
 
-    # --- 3. most_recent_closed_trade (real entry + real exit, V5.3 only) ---
+    # --- 3. most_recent_closed_trade (real entry + real exit, V6 only) ---
     try:
         q = """
             SELECT
@@ -373,7 +373,7 @@ def get_open_position() -> dict[str, Any]:
             f"at {mr.get('realized_return_pct')}%."
         )
     else:
-        parts.append("No closed V5.3 trades yet in the ledger.")
+        parts.append("No closed V6 trades yet in the ledger.")
 
     parts.append(
         "Reminder: the paper-trader is a batch simulator. There is no live "
@@ -389,7 +389,7 @@ def get_position_history(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Returns realized (closed) V5.3 paper trades from the last N days, row-level,
+    Returns realized (closed) V6 paper trades from the last N days, row-level,
     for chat-agent answers like "show me recent wins/losses" or "how did FIX do".
     PIT-safe: only rows where exit_timestamp IS NOT NULL AND DATE(exit_timestamp)
     < today (no intraday-open rows).

@@ -1,10 +1,10 @@
 """
 Historical performance tool for GammaRips MCP.
 
-Reads from `forward_paper_ledger` — the V5.3 paper-trader's realized bracket
+Reads from `forward_paper_ledger` — the V6 paper-trader's realized bracket
 trades (one pick per day, −60%/+80% bracket, 3-day hold). This is distinct
 from `get_win_rate_summary` which reads `signal_performance` (the enriched-
-signal outcome table, ALL signals, not just the daily V5.3 pick).
+signal outcome table, ALL signals, not just the daily V6 pick).
 
 Chat agents should use this tool when a user asks "how has GammaRips' STRATEGY
 done in the last 30 days?" — the realized strategy track record, not the
@@ -36,9 +36,9 @@ def get_historical_performance(
     min_premium_score: int | None = None,
 ) -> dict[str, Any]:
     """
-    Aggregate V5.3 paper-trader performance over a lookback window.
+    Aggregate V6 paper-trader performance over a lookback window.
 
-    READS FROM `forward_paper_ledger` — V5.3 realized trades only. Skips
+    READS FROM `forward_paper_ledger` — V6 realized trades only. Skips
     `INVALID_LIQUIDITY` and `SKIPPED` rows (terminal but uninformative). PIT-safe:
     only rows where exit_timestamp < today.
 
@@ -152,7 +152,7 @@ def get_historical_performance(
             "median_return": round(median, 4),
             "best": round(best, 4),
             "worst": round(worst, 4),
-            "period": f"last {lookback_days} days, V5.3 realized bracket trades",
+            "period": f"last {lookback_days} days, V6 realized bracket trades",
             "filters": {
                 "direction": dir_filter,
                 "min_premium_score": score_filter,

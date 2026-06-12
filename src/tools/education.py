@@ -25,7 +25,7 @@ ET = ZoneInfo("America/New_York")
 # ---------------------------------------------------------------------------
 #
 # Hardcoded lookup. The chat agent asks "what does premium_score mean?" and
-# we return the canonical definition + the role it plays in the V5.3 pipeline.
+# we return the canonical definition + the role it plays in the V6 pipeline.
 # No LLM in the path → zero hallucination risk. Add new entries as the agent
 # encounters fields it can't explain (rather than blanket-exposing the schema).
 
@@ -38,8 +38,10 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "implied-vol regime."
         ),
         "how_used": (
-            "V5.3 enrichment requires score ≥ 1; the daily pick is chosen from "
-            "the top of this ranking after additional liquidity and regime gates."
+            "V6 enrichment requires score ≥ 4; the daily pick is chosen from this "
+            "pool after the BULLISH-only gate, a delta edge-rank to the top ~50, "
+            "two safety rails (no earnings in the 3-day hold; VIX ≤ VIX3M), and a "
+            "randomized 3-bracket consensus tournament."
         ),
     },
     "premium_score": {
@@ -50,8 +52,9 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "underlying trend)."
         ),
         "how_used": (
-            "Used by signal-notifier as a tiebreaker when multiple candidates "
-            "clear V5.3 gates. Does NOT call any LLM — fully deterministic."
+            "Deterministic composite (no LLM). A legacy ranking aid retained for "
+            "context; the V6 pick is decided by the bracket tournament, not by "
+            "this score."
         ),
     },
     "volume_oi_ratio": {
@@ -62,8 +65,11 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "outstanding entering the session — a footprint of new positioning."
         ),
         "how_used": (
-            "V5.3 signal-notifier requires V/OI > 2 — strong evidence the "
-            "flow is fresh institutional positioning, not stale open interest."
+            "A high V/OI is evidence the flow is fresh institutional positioning "
+            "rather than stale open interest. NOTE: V/OI is no longer a selection "
+            "gate under V6 — it was retired because the overnight UOA spike does "
+            "not become open interest until the next session. It survives as "
+            "descriptive context only."
         ),
     },
     "vol_oi_ratio": {
@@ -73,8 +79,8 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "Synonym for volume_oi_ratio."
         ),
         "how_used": (
-            "V5.3 signal-notifier requires V/OI > 2 to qualify a signal as "
-            "the daily tradeable pick."
+            "Descriptive context only. Synonym for volume_oi_ratio — no longer a "
+            "V6 selection gate."
         ),
     },
     "moneyness_pct": {
@@ -85,25 +91,27 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "below (puts) the underlying."
         ),
         "how_used": (
-            "V5.3 signal-notifier requires 5% ≤ moneyness ≤ 15%. Closer-to-money "
-            "decays slower; farther OTM has more leverage but lower hit rate."
+            "Closer-to-money decays slower; farther OTM has more leverage but a "
+            "lower hit rate. NOTE: the old 5–15% OTM moneyness gate was retired "
+            "under V6 — moneyness is no longer a hard selection filter. Contract "
+            "choice is delta-driven (a mid-|delta| 0.20–0.46 edge prior)."
         ),
     },
     "otm_pct": {
         "label": "OTM %",
         "definition": "How far out-of-the-money the strike is, in percent. Synonym for moneyness_pct.",
-        "how_used": ("V5.3 signal-notifier requires 5% ≤ moneyness ≤ 15%."),
+        "how_used": ("Descriptive context only — no longer a V6 selection gate."),
     },
     "recommended_contract": {
         "label": "Recommended Contract",
         "definition": (
-            "The OCC-style option contract symbol the V5.3 pipeline picked "
+            "The OCC-style option contract symbol the V6 pipeline picked "
             "for the trade — e.g. O:NVDA260516C00130000 = NVDA $130 call "
             "expiring 2026-05-16."
         ),
         "how_used": (
-            "Resolved by the enrichment service from {underlying, direction, "
-            "DTE 7-14, 5-15% OTM, ≤10% spread}. Not user-modifiable."
+            "Resolved by the enrichment service for the chosen BULLISH name "
+            "(delta-driven strike, short-DTE). Not user-modifiable."
         ),
     },
     "recommended_strike": {
@@ -124,9 +132,9 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         "label": "DTE (Days To Expiration)",
         "definition": "Calendar days from the recommended_expiration to scan_date.",
         "how_used": (
-            "V5.3 enrichment targets DTE 7-14. Below 7 → theta ramp dominates "
-            "in the 3-day hold. Above 14 → wastes capital on time the strategy "
-            "doesn't need."
+            "V6 enrichment targets a short DTE (roughly 7-14 days). Below ~7 → "
+            "theta ramp dominates in the 3-day hold. Well above that → wastes "
+            "capital on time the strategy doesn't need."
         ),
     },
     "recommended_mid_price": {
@@ -144,8 +152,10 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         "label": "Spread %",
         "definition": "(ask - bid) / mid for the recommended contract, expressed as a percent.",
         "how_used": (
-            "V5.3 enrichment requires spread ≤ 10%. Wider spreads kill the "
-            "expected value of a −60/+80 bracket on small contracts."
+            "Historically used as a ≤10% spread gate. RETIRED under V6 — the "
+            "current Polygon data plan serves no live option quotes, so spread is "
+            "permanently NULL and contracts price off last-trade / day-close. No "
+            "longer a selection gate."
         ),
     },
     "call_dollar_volume": {
@@ -156,27 +166,32 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "options activity."
         ),
         "how_used": (
-            "V5.3 enrichment requires directional UOA > $500K. Filters out "
-            "low-conviction or coincidentally-traded names."
+            "V6 enrichment requires directional UOA > $500K. Filters out "
+            "low-conviction or coincidentally-traded names. Calls drive the live "
+            "BULLISH-only strategy."
         ),
     },
     "put_dollar_volume": {
         "label": "Put Dollar Volume (Directional UOA)",
         "definition": "Today's notional dollar volume in puts. Bearish-direction analog of call_dollar_volume.",
-        "how_used": "Same gate threshold as call_dollar_volume — directional UOA > $500K.",
+        "how_used": (
+            "Same $500K enrichment threshold as call_dollar_volume. NOTE: the live "
+            "V6 strategy trades BULLISH calls only, so put-side rows appear in "
+            "historical data but are not currently selectable."
+        ),
     },
     "vix3m_at_enrich": {
         "label": "VIX3M (at enrichment time)",
         "definition": "Forward 3-month VIX at the moment of enrichment (~05:30 ET on the entry date).",
         "how_used": (
-            "V5.3 regime gate: signal-notifier requires VIX(now) ≤ VIX3M. "
+            "V6 regime safety rail: signal-notifier requires VIX(now) ≤ VIX3M. "
             "Backwardation (spot > forward) means traders are pricing imminent "
             "vol → adverse regime for our 3-day directional trade."
         ),
     },
     "vix_now_at_decision": {
         "label": "VIX (at decision time)",
-        "definition": "Spot VIX at the moment of signal-notifier decision (~09:00 ET).",
+        "definition": "Spot VIX at the moment of signal-notifier decision (~07:30 ET).",
         "how_used": (
             "Compared to vix3m_at_enrich for the regime gate. If spot > forward "
             "(backwardation) we skip the day with skip_reason='vix_backwardation'."
@@ -184,10 +199,10 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
     },
     "is_premium_signal": {
         "label": "Premium Signal Flag",
-        "definition": "Boolean: did the signal pass all 5 premium-tier flags AND clear V5.3 gates?",
+        "definition": "Boolean: did the signal pass all 5 premium-tier flags AND clear enrichment?",
         "how_used": (
-            "Used as a tiebreaker if multiple signals clear V5.3 gates on the "
-            "same morning. Premium-flagged signals are preferred."
+            "A legacy quality flag retained for context. Under V6 the daily pick "
+            "is decided by the bracket tournament, not by this flag."
         ),
     },
     "key_headline": {

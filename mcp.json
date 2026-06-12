@@ -1,6 +1,6 @@
 {
   "name": "GammaRips",
-  "description": "One options trade a day, scored before you wake up. Free MCP endpoint exposing 15 tools over the V5.3 paper-trading engine. Paper-trading, educational only. Not investment advice.",
+  "description": "One options trade a day, picked before you wake up. Free MCP endpoint exposing 15 tools over the V6 paper-trading engine. Paper-trading, educational only. Not investment advice.",
   "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
   "auth": { "type": "none" },
   "tools": [
@@ -21,7 +21,7 @@
     "web_search"
   ],
   "primary_tool": "get_todays_pick",
-  "publication_time": "09:00 ET weekdays",
+  "publication_time": "07:30 ET weekdays",
   "universe": "5,230 US equities",
   "tags": ["options", "institutional-flow", "overnight", "paper-trading", "signals", "mcp", "free"],
   "links": {
