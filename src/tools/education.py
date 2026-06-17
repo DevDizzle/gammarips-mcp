@@ -79,8 +79,7 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "Synonym for volume_oi_ratio."
         ),
         "how_used": (
-            "Descriptive context only. Synonym for volume_oi_ratio — no longer a "
-            "V6 selection gate."
+            "Descriptive context only. Synonym for volume_oi_ratio — no longer a V6 selection gate."
         ),
     },
     "moneyness_pct": {

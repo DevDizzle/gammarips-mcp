@@ -119,7 +119,28 @@ docker build -t gammarips-mcp:test .
 
 ## Deployment
 
-The repo includes a GitHub Actions workflow for deploying to Cloud Run on pushes to `main`.
+Deployment is **manual** (the CD workflow was removed; `.github/workflows/ci.yml`
+only runs `ruff format --check` + `ruff check` on pushes/PRs to `main`).
+
+Ship a new revision with the deploy script, which uses a Cloud Run **source
+deploy** and reproduces the live config exactly (secrets via Secret Manager,
+`REQUIRE_API_KEY=false`):
+
+```bash
+bash scripts/deploy.sh
+```
+
+Equivalent one-liner:
+
+```bash
+gcloud run deploy gammarips-mcp --source=. \
+  --project=profitscout-fida8 --region=us-central1 \
+  --set-env-vars="REQUIRE_API_KEY=false" \
+  --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_CSE_ID=GOOGLE_CSE_ID:latest"
+```
+
+> The API keys are mounted from Secret Manager — never pass them as plain env
+> vars (that clobbers the secret mounts).
 
 ## Security
 
