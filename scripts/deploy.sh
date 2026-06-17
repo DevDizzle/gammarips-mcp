@@ -1,7 +1,18 @@
 #!/bin/bash
 
 # GammaRips MCP Server - Cloud Run Deployment Script
-# This script builds and deploys the MCP server to Google Cloud Run
+#
+# Deploys via Cloud Run SOURCE DEPLOY (`gcloud run deploy --source=.`), which is
+# how this service is actually shipped (image lands in the cloud-run-source-deploy
+# Artifact Registry repo). Matches the live config exactly and is safe to re-run.
+#
+# IMPORTANT — config that MUST match the live service (do not drift):
+#   * Secrets are mounted from Secret Manager via --set-secrets (NOT plain env).
+#     Setting these as plain env vars would clobber the secret mounts and break
+#     Polygon + Google search.
+#   * REQUIRE_API_KEY=false is the live auth posture. Do not flip to true here.
+#   * BIGQUERY_DATASET / GCS_BUCKET_NAME / *_TABLE values are CODE DEFAULTS, not
+#     env vars on the live service — intentionally not set here.
 
 set -e  # Exit on error
 
@@ -9,55 +20,33 @@ set -e  # Exit on error
 PROJECT_ID="${GCP_PROJECT_ID:-profitscout-fida8}"
 REGION="${GCP_REGION:-us-central1}"
 SERVICE_NAME="gammarips-mcp"
-REPOSITORY_NAME="gammarips-mcp"
 
 echo "========================================="
 echo "GammaRips MCP Server Deployment"
 echo "========================================="
-echo "Project ID: $PROJECT_ID"
-echo "Region: $REGION"
+echo "Project ID:   $PROJECT_ID"
+echo "Region:       $REGION"
 echo "Service Name: $SERVICE_NAME"
 echo ""
 
-# Set the active project
-echo "Setting active GCP project..."
-gcloud config set project $PROJECT_ID
-
-# Create Artifact Registry repository if it doesn't exist
-echo "Checking Artifact Registry repository..."
-if ! gcloud artifacts repositories describe $REPOSITORY_NAME --location=$REGION &>/dev/null; then
-    echo "Creating Artifact Registry repository..."
-    gcloud artifacts repositories create $REPOSITORY_NAME \
-        --repository-format=docker \
-        --location=$REGION \
-        --description="GammaRips MCP Server container images"
-else
-    echo "Artifact Registry repository already exists."
-fi
-
-# Build the container image
-echo ""
-echo "Building container image..."
-IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY_NAME/$SERVICE_NAME:latest"
-
-gcloud builds submit \
-    --region=$REGION \
-    --tag $IMAGE_TAG
-
-# Deploy to Cloud Run
-echo ""
-echo "Deploying to Cloud Run..."
-gcloud run deploy $SERVICE_NAME \
-    --image $IMAGE_TAG \
-    --region=$REGION \
+# Deploy to Cloud Run from source. A new revision inherits prior config, but we
+# pass the full secret/env/runtime spec explicitly so this also bootstraps a
+# fresh service correctly and stays self-documenting.
+echo "Building and deploying from source..."
+gcloud run deploy "$SERVICE_NAME" \
+    --source=. \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
     --platform=managed \
     --allow-unauthenticated \
     --port=8080 \
     --memory=1Gi \
     --cpu=1 \
+    --concurrency=80 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="GCP_PROJECT_ID=profitscout-fida8,GCP_REGION=$REGION,BIGQUERY_DATASET=profit_scout,GCS_BUCKET_NAME=profit-scout-data,GOOGLE_CSE_ID=${GOOGLE_CSE_ID},GOOGLE_API_KEY=${GOOGLE_API_KEY},REQUIRE_API_KEY=true,FIRESTORE_COLLECTION_USERS=users,WINNERS_DASHBOARD_TABLE=profitscout-fida8.profit_scout.winners_dashboard,OPTION_CHAINS_TABLE=profitscout-fida8.profit_scout.options_chain,PERFORMANCE_TRACKER_TABLE=profitscout-fida8.profit_scout.performance_tracker,CALENDAR_EVENTS_TABLE=profitscout-fida8.profit_scout.calendar_events,OVERNIGHT_SIGNALS_TABLE=overnight_signals"
+    --set-env-vars="REQUIRE_API_KEY=false" \
+    --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_CSE_ID=GOOGLE_CSE_ID:latest"
 
 echo ""
 echo "========================================="
@@ -65,8 +54,8 @@ echo "Deployment complete!"
 echo "========================================="
 echo ""
 echo "Service URL:"
-gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)'
+gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)'
 echo ""
-echo "To test the MCP server, use the Cloud Run proxy:"
-echo "  gcloud run services proxy $SERVICE_NAME --region=$REGION"
+echo "Live revision:"
+gcloud run services describe "$SERVICE_NAME" --region="$REGION" --project="$PROJECT_ID" --format='value(status.latestReadyRevisionName)'
 echo ""
