@@ -10,6 +10,8 @@ WORKDIR /app
 # Copy project files
 COPY pyproject.toml ./
 COPY src ./src
+# Methodology playbooks served by list_playbooks/get_playbook + MCP resources
+COPY content ./content
 
 # Install dependencies
 RUN uv pip install --system --no-cache -e .
