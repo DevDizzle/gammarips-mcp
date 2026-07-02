@@ -75,8 +75,18 @@ parameters to a tight range *before* the query is built. Bounds:
 | `get_signal_explainer` | n/a (single dict) | n/a |
 | `get_enriched_signal_schema` | classification metadata only | n/a |
 
-The `MAX_RESPONSE_ROWS = 200` constant in `src/utils/safety.py` is a final
-backstop applied across the codebase.
+The `MAX_RESPONSE_ROWS = 200` constant in `src/utils/safety.py` is the
+convention every per-tool clamp and hard `LIMIT` is defined against (all row
+limits are ≤ 200); it is enforced per-tool, not by a runtime wrapper.
+
+Two guards added after the V3 pre-deploy audit:
+- **Pick-flag disclosure guard** — `was_tournament_pick` / `was_topscore_pick`
+  are NULLed in every response unless the row's entry day is strictly past
+  (ET), so the operator's current selection is structurally unreadable from
+  the substrate regardless of when the upstream labeler runs.
+- **`web_search` global bucket** — a process-wide token bucket inside the tool
+  itself (default 10/min) so the strict search limit holds on ALL transports,
+  not just the `/rpc` paths the per-IP middleware can sniff.
 
 ### 4. Per-IP rate limit
 

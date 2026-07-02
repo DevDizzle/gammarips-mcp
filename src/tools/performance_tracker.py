@@ -247,7 +247,8 @@ def get_position_history(
 
     Realized-only by construction: rows appear only after the trade's exit,
     never same-day, so this tool cannot front-run the engine's private
-    selection. Skip days and invalid-liquidity rows are excluded.
+    selection. No-trade days are reported separately in `skip_days` (they are
+    part of the honest track record); invalid-liquidity rows are excluded.
 
     Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-06-26): enter 10:00 ET
     the day after scan, +40% target / -30% stop, flat 15:45 ET same day.
@@ -287,10 +288,10 @@ def get_position_history(
                 entry_timestamp, exit_timestamp, policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
             WHERE exit_timestamp IS NOT NULL
-              AND DATE(exit_timestamp) < CURRENT_DATE()
+              AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL
               AND exit_reason NOT IN ("INVALID_LIQUIDITY", "SKIPPED")
-              AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)
               AND IFNULL(is_skipped, FALSE) = FALSE
         """
         query_params = [
@@ -316,13 +317,40 @@ def get_position_history(
                 if hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
             rows.append(r)
+
+        # Skip days are the honesty signal for fail-closed days (regime rail,
+        # no candidates) — surface them alongside the trades, past days only.
+        skip_query = """
+            SELECT CAST(scan_date AS STRING) AS scan_date, skip_reason
+            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+            WHERE IFNULL(is_skipped, FALSE) = TRUE
+              AND scan_date < CURRENT_DATE('America/New_York')
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)
+        """
+        skip_params = [bigquery.ScalarQueryParameter("days", "INTEGER", days)]
+        if policy_version and policy_version.lower() != "all":
+            skip_query += " AND policy_version = @policy_version"
+            skip_params.append(
+                bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
+            )
+        skip_query += " ORDER BY scan_date DESC LIMIT 100"
+        skip_days = [
+            dict(row)
+            for row in client.query(
+                skip_query, job_config=bigquery.QueryJobConfig(query_parameters=skip_params)
+            ).result()
+        ]
+
         return {
             "policy_version": policy_version or "all",
             "row_count": len(rows),
             "rows": rows,
+            "skip_days": skip_days,
             "note": (
-                "Realized rows only (exit strictly before today). "
-                "realized_return_pct is a FRACTION of entry premium. "
+                "Realized rows only (exit strictly before today, ET). "
+                "realized_return_pct is a FRACTION of entry premium. skip_days "
+                "lists no-trade days (fail-closed regime rail, no candidates) — "
+                "they are part of the honest track record. "
                 "Paper-traded. Not investment advice."
             ),
         }

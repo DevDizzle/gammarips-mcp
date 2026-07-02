@@ -30,7 +30,7 @@ from typing import Any
 
 from google.cloud import bigquery
 
-from utils.safety import clamp, safe_error
+from utils.safety import MAX_RESPONSE_ROWS, clamp, safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,23 @@ _COMPOSITE_DISCLAIMER = (
     "exits, not as a strategy track record. Paper-traded research data. "
     "Not investment advice."
 )
+
+
+def _pick_flag_guard(prefix: str = "") -> str:
+    """SELECT ... REPLACE clause that NULLs the cohort pick flags until the
+    entry day is strictly past (ET). The engine's label pass normally lags a
+    day anyway, but that lag is cron scheduling, not physics — this makes the
+    pick-privacy guarantee structural inside the MCP: the operator's current
+    selection can never be read off the substrate, regardless of when the
+    upstream labeler runs."""
+    p = prefix
+    return (
+        "REPLACE ("
+        f"IF({p}entry_day < CURRENT_DATE('America/New_York'), "
+        f"{p}was_tournament_pick, NULL) AS was_tournament_pick, "
+        f"IF({p}entry_day < CURRENT_DATE('America/New_York'), "
+        f"{p}was_topscore_pick, NULL) AS was_topscore_pick)"
+    )
 
 
 def _serialize(r: dict[str, Any]) -> dict[str, Any]:
@@ -115,7 +132,7 @@ def get_pool_features(
             return {"error": "No data found in the features view"}
 
         query = f"""
-            SELECT *
+            SELECT * {_pick_flag_guard()}
             FROM {_FEATURES_VIEW}
             WHERE scan_date = @scan_date
         """
@@ -200,7 +217,7 @@ def get_opportunity_surface(
         if not include_open:
             query += " AND opp_status = 'OK'"
 
-        query += " ORDER BY scan_date DESC, opp_peak_return DESC LIMIT 200"
+        query += f" ORDER BY scan_date DESC, opp_peak_return DESC LIMIT {MAX_RESPONSE_ROWS}"
 
         job_config = bigquery.QueryJobConfig(query_parameters=params)
         rows = [_serialize(dict(r)) for r in client.query(query, job_config=job_config).result()]
@@ -283,7 +300,7 @@ def query_outcomes(
 
     if horizon not in _LABEL_COLS:
         return {"error": "horizon must be 'same_day' or '3d'"}
-    limit = clamp(limit, 1, 200, default=100)
+    limit = clamp(limit, 1, MAX_RESPONSE_ROWS, default=100)
     label_col = "o.realized_return_pct" if horizon == "same_day" else "o.realized_return_pct_3d"
 
     try:
@@ -321,9 +338,11 @@ def query_outcomes(
 
         query = f"""
             SELECT
-                f.*,
+                f.* {_pick_flag_guard("f.")},
                 {_LABEL_COLS[horizon]},
-                o.opp_peak_return, o.opp_trough_return, o.opp_status
+                IF(o.opp_status = 'OK', o.opp_peak_return, NULL) AS opp_peak_return,
+                IF(o.opp_status = 'OK', o.opp_trough_return, NULL) AS opp_trough_return,
+                o.opp_status
             FROM {_FEATURES_VIEW} f
             JOIN {_OUTCOMES_TABLE} o
               USING (scan_date, ticker, recommended_contract)
@@ -459,8 +478,8 @@ def get_outcome_summary(
                 ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(50)], 4) AS median_return,
                 ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(25)], 4) AS p25_return,
                 ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(75)], 4) AS p75_return,
-                ROUND(AVG(o.opp_peak_return), 4) AS avg_mfe,
-                ROUND(AVG(o.opp_trough_return), 4) AS avg_mae
+                ROUND(AVG(IF(o.opp_status = 'OK', o.opp_peak_return, NULL)), 4) AS avg_mfe,
+                ROUND(AVG(IF(o.opp_status = 'OK', o.opp_trough_return, NULL)), 4) AS avg_mae
             FROM {_FEATURES_VIEW} f
             JOIN {_OUTCOMES_TABLE} o
               USING (scan_date, ticker, recommended_contract)

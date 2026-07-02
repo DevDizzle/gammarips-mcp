@@ -18,7 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from utils.safety import RateLimitMiddleware
+from utils.safety import RateLimitMiddleware, redact
 
 # Load environment variables
 load_dotenv()
@@ -340,7 +340,7 @@ async def handle_jsonrpc(request: Request):
                 content={
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "error": {"code": -32603, "message": str(e)},
+                    "error": {"code": -32603, "message": redact(str(e))},
                 }
             )
 

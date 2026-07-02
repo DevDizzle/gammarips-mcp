@@ -28,21 +28,79 @@ FORWARD_OUTCOME_COLS = {
 }
 
 # Realized/label/telemetry columns that must NEVER appear in the features tool.
+# Mirrors the exclusion groups in the engine's create_enriched_features_view.py.
 NON_FEATURE_COLS = {
-    "realized_return_pct",
-    "realized_return_pct_3d",
-    "exit_reason",
-    "exit_reason_3d",
+    # same-day label group
+    "entry_timestamp",
     "entry_price",
+    "target_price",
+    "stop_price",
+    "trail_trigger_price",
+    "peak_premium",
+    "trail_activated",
+    "trail_stop_at_exit",
     "exit_timestamp",
+    "exit_reason",
+    "exit_day",
+    "realized_return_pct",
+    "exit_slippage",
+    "illiquid_exit",
+    "late_fill_minutes",
+    # 3-day label group
+    "realized_return_pct_3d",
+    "exit_reason_3d",
+    "exit_day_3d",
+    "exit_timestamp_3d",
+    "entry_price_3d",
+    "peak_premium_3d",
+    # label-semantics tags
+    "label_sim_version",
+    "label_hold_days",
+    "label_stop_pct",
+    "label_target_pct",
+    "label_3d_sim_version",
+    "label_3d_hold_days",
+    "label_3d_stop_pct",
+    "label_3d_target_pct",
+    # opportunity surface
     "opp_peak_return",
     "opp_trough_return",
+    "opp_minutes_to_peak",
+    "opp_minutes_to_trough",
+    "opp_entry_price",
+    "opp_entry_timestamp",
+    "opp_bar_count",
+    "opp_window_days",
+    "opp_status",
+    "opp_sim_version",
+    # entry-day-close regime telemetry + legacy leak columns
     "oc_vix_at_close",
     "oc_spy_trend_at_close",
+    "oc_vix_5d_delta_at_close",
     "VIX_at_entry",
     "SPY_trend_state",
     "vix_5d_delta_entry",
+    # benchmarking (realized post-entry)
+    "iv_rank_entry",
+    "iv_percentile_entry",
+    "hv_20d_entry",
+    "underlying_entry_price",
+    "underlying_exit_price",
+    "underlying_return",
+    "spy_entry_price",
+    "spy_exit_price",
+    "spy_return_over_window",
+    "labeled_at",
 }
+
+
+def _assert_pick_flags_guarded(rows, name):
+    """Non-NULL pick flags may only appear on strictly-past entry days (ET)."""
+    today = date.today().isoformat()
+    for r in rows:
+        for flag in ("was_tournament_pick", "was_topscore_pick"):
+            if flag in r and r[flag] is not None and str(r.get("entry_day", ""))[:10] >= today:
+                _fail(name, f"pick flag {flag} exposed for entry_day {r.get('entry_day')}")
 
 
 def _fail(name: str, msg: str):
@@ -158,6 +216,7 @@ def run_all() -> list[tuple[str, str]]:
         bad = NON_FEATURE_COLS & set(rows[0].keys())
         if bad:
             _fail("get_pool_features", f"LEAK: non-feature cols {bad}")
+        _assert_pick_flags_guarded(rows, "get_pool_features")
         return f"({out['row_count']} rows @ {out['scan_date']}, features only)"
 
     check("get_pool_features", lambda: get_pool_features(limit=10), _verify_features)
@@ -183,6 +242,12 @@ def run_all() -> list[tuple[str, str]]:
             _fail("query_outcomes", "illiquid row leaked through default filter")
         if "realized_return_pct_3d" in rows[0]:
             _fail("query_outcomes", "3d label mixed into same_day horizon")
+        for r in rows:
+            if r.get("opp_status") != "OK" and (
+                r.get("opp_peak_return") is not None or r.get("opp_trough_return") is not None
+            ):
+                _fail("query_outcomes", "open-window opp excursion leaked")
+        _assert_pick_flags_guarded(rows, "query_outcomes")
         meta = out["meta"]
         return f"({out['row_count']} rows; excl null={meta['excluded_null_label']} illiq={meta['excluded_illiquid']})"
 
@@ -290,7 +355,11 @@ def run_all() -> list[tuple[str, str]]:
                 _fail("get_position_history", f"non-realized row leaked: {r['exit_timestamp']}")
             if r["policy_version"] != "V7_1_TILTED_GIGO":
                 _fail("get_position_history", f"cohort mix: {r['policy_version']}")
-        return f"({out['row_count']} realized rows, cohort clean)"
+        if "skip_days" not in out:
+            _fail("get_position_history", "skip_days missing from response")
+        return (
+            f"({out['row_count']} realized rows, {len(out['skip_days'])} skip days, cohort clean)"
+        )
 
     check("get_position_history", lambda: get_position_history(days=30), _verify_positions)
     check(

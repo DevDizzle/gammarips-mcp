@@ -3,13 +3,19 @@ import os
 
 import requests
 
-from utils.safety import clamp, safe_error
+from utils.safety import GlobalToolBucket, clamp, safe_error
 
 logger = logging.getLogger(__name__)
 
 # Caller-supplied query strings hit a paid Google Custom Search API. Cap the
 # query length to defend against memory-amplification + cost attacks.
 _MAX_QUERY_LEN = 500
+
+# Transport-independent cost backstop: the per-IP middleware bucket only sees
+# the stateless /rpc paths, so calls over Streamable HTTP / SSE would bypass
+# the stricter search limit. This process-wide bucket holds regardless of how
+# the call arrived.
+_SEARCH_BUCKET = GlobalToolBucket(per_min=float(os.getenv("RATE_LIMIT_SEARCH_PER_MIN", "10")))
 
 
 def web_search(query: str, num_results: int = 5) -> str:
@@ -29,6 +35,9 @@ def web_search(query: str, num_results: int = 5) -> str:
 
     if not api_key or not cse_id:
         return "Error: GOOGLE_API_KEY or GOOGLE_CSE_ID not configured in environment."
+
+    if not _SEARCH_BUCKET.try_consume():
+        return "Error: web_search rate limit exceeded. Slow down and try again shortly."
 
     # Bound caller-controlled inputs before they reach the paid Google CSE API.
     query = (query or "")[:_MAX_QUERY_LEN]

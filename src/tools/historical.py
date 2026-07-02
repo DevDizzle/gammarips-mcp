@@ -103,11 +103,11 @@ def get_historical_performance(
                 scan_date, entry_timestamp, exit_timestamp, policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
             WHERE exit_timestamp IS NOT NULL
-              AND DATE(exit_timestamp) < CURRENT_DATE()
+              AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL
               AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
               AND IFNULL(is_skipped, FALSE) = FALSE
-              AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @lookback DAY)
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @lookback DAY)
             """
         ]
         params: list = [
