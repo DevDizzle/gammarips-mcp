@@ -1,64 +1,81 @@
 # GammaRips MCP Server
 
-Agent-first options trading intelligence for overnight and pre-market setups.
+Options-flow intelligence **primitives** for AI agents.
 
-GammaRips exposes a free hosted MCP server for querying overnight options-flow signals, enriched ticker analysis, performance tracking, and daily market intelligence reports.
+Every trading morning GammaRips scans the US options market for unusual institutional activity and curates it hard — down to a ~50-name high-signal BULLISH pool. This MCP server gives a bring-your-own-agent trader that pool plus the substrate to reason over it: point-in-time features, realized **opportunity surfaces** (max-favorable / max-adverse excursions with no exit applied), bracket outcome labels, regime context, and methodology playbooks.
+
+**Design principle: primitives, never a pick.** There is no "what should I buy" endpoint. Every agent reasons from the same data to its *own* contract and its *own* exit. Paper-traded research data; educational only; not investment advice.
 
 ## Hosted MCP endpoint
 
-- **SSE:** `https://gammarips-mcp-406581297632.us-central1.run.app/sse`
-- **JSON-RPC:** `https://gammarips-mcp-406581297632.us-central1.run.app/jsonrpc`
+- **Streamable HTTP (primary):** `https://gammarips-mcp-406581297632.us-central1.run.app/mcp`
+- **SSE (legacy, deprecation window):** `https://gammarips-mcp-406581297632.us-central1.run.app/sse`
+- **Stateless JSON-RPC:** `https://gammarips-mcp-406581297632.us-central1.run.app/jsonrpc`
 - **Server card:** `https://gammarips-mcp-406581297632.us-central1.run.app/.well-known/mcp/server-card.json`
-- **Auth:** none
+- **Auth:** none today. Bearer-token auth for paid tiers is Phase 2 of `docs/MCP-V3-SPEC.md`.
 
-## Available tools (18)
+## Available tools (23)
 
-### Signal data
-- `get_overnight_signals` — raw overnight scanner output by date, direction, ticker, or minimum score
-- `get_enriched_signals` — AI-enriched high-conviction setups with technical and catalyst context
-- `get_signal_detail` — deep dive on one ticker's signal
-- `get_todays_pick` — V6 canonical daily pick (Firestore)
-- `list_todays_picks` — last N days of canonical picks (includes skip-reason days)
-- `get_freemium_preview` — top-N enriched signals, narrow fields (public/teaser)
+### Live pool
+- `get_enriched_signals` — the curated daily candidate pool: enrichment narrative, technicals, catalyst, recommended contract, `mom_60` (leakage-safe view)
+- `get_signal_detail` — full enrichment for one ticker
+- `get_overnight_signals` — the raw pre-curation scan (wide net)
+- `get_freemium_preview` — top-N teaser, narrow fields
 
-### Performance / history
-- `get_signal_performance` — outcome tracking from `signal_performance` (~30 signals/day)
-- `get_win_rate_summary` — aggregate win rate from `signal_performance`
-- `get_open_position` — current V6 trade status (pending pick, awaiting sim, last close)
-- `get_position_history` — V6 realized bracket trades from `forward_paper_ledger`
-- **`get_historical_performance`** — V6 ledger aggregate over a lookback (NEW 2026-04-27)
+### Research substrate (V3)
+- `get_pool_features` — point-in-time feature vectors from the allowlist features view
+- `get_opportunity_surface` — per-contract realized MFE/MAE excursions, exit-free (the core product surface)
+- `query_outcomes` — row-level bracket labels (same-day GIGO or 3-day) joined to features
+- `get_outcome_summary` — grouped aggregates (delta bucket, score, exit reason, ...) with honest exclusion counts
+- `estimate_exit_rule` — classify YOUR (target, stop) bracket against the surface; EV bounds, heuristic share reported
+- `get_regime_context` — VIX/VIX3M/SPY-trend as-of scan date + the fail-closed rail
+
+### Methodology
+- `list_playbooks` / `get_playbook` — server-versioned playbooks: `start-here`, `daily-workflow`, `run-your-own-tournament`, `exit-lab`, `leakage-and-data-contract`, `changelog`. Also exposed as MCP resources (`gammarips://playbooks/{name}`).
+
+### Performance / receipts
+- `get_position_history` — the engine's realized paper trades (T+1 receipts; cohort-filtered, default live `V7_1_TILTED_GIGO`)
+- `get_historical_performance` — cohort aggregate of the above
+- `get_signal_performance` / `get_win_rate_summary` — UNDERLYING-stock direction outcomes for the broad pool (explicitly **not** option PnL)
 
 ### Reports & metadata
-- `get_daily_report` — latest full daily intelligence report
-- `get_report_list` — list available reports
-- `get_available_dates` — list dates with available scan data
-- `get_enriched_signal_schema` — public-safe column schema (whitelisted)
+- `get_daily_report` / `get_report_list` — daily intelligence reports
+- `get_available_dates` — scan dates with data
+- `get_enriched_signal_schema` — the machine-readable data contract: every substrate column with its leakage classification (`feature | label | opportunity | regime_telemetry | identity`) and as-of boundary
 
-### Reference / education (NEW 2026-04-27)
-- **`get_market_calendar_status`** — NYSE open / next open / next close / holiday status
-- **`get_signal_explainer`** — plain-English definition of any GammaRips field name
-
-### External
+### Reference / external
+- `get_market_calendar_status` — NYSE calendar status
+- `get_signal_explainer` — plain-English definition of any field (deterministic, no LLM)
 - `web_search` — Google Custom Search (rate-limited, 10 req/min/IP)
+
+### Removed in V3
+`get_todays_pick`, `list_todays_picks`, `get_open_position` — the engine's own daily selection is no longer published same-day (realized receipts remain via `get_position_history`).
+
+## Prompts
+
+`morning_brief`, `analyze_candidate(ticker)`, `run_your_own_tournament` — thin orchestrations over the tools above. None returns a pick.
 
 ## Quick connect
 
-### OpenClaw / generic MCP config
+### Claude Code
+
+```bash
+claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+```
+
+### Generic MCP config
 
 ```json
 {
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
-      "transport": "sse"
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp"
     }
   }
 }
 ```
 
-### Claude Desktop / other local-client style config
-
-If your client supports remote SSE servers, use the hosted endpoint above. If it only supports local stdio processes, run the server locally and point your client at that wrapper process.
+Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
 
 ## Local development
 
@@ -84,7 +101,7 @@ cp .env.example .env
 PYTHONPATH=src python src/server.py
 ```
 
-The server binds to `0.0.0.0:${PORT:-8080}` and serves MCP over SSE.
+The server binds to `0.0.0.0:${PORT:-8080}`, Streamable HTTP at `/mcp` (SSE fallback).
 
 ### Docker
 
@@ -142,11 +159,14 @@ gcloud run deploy gammarips-mcp --source=. \
 > The API keys are mounted from Secret Manager — never pass them as plain env
 > vars (that clobbers the secret mounts).
 
+**Before any deploy that changes data exposure: run the `gammarips-review` leakage audit** (see `docs/MCP-V3-SPEC.md` §2.4).
+
 ## Security
 
 See [`SECURITY.md`](./SECURITY.md) for the trust model — read-only guarantee,
 parameterized-query SQL-injection defense, response-size bounds, per-IP rate
-limits, sanitized errors, and schema whitelisting.
+limits, sanitized errors, leakage-safe views, and the column-classification
+data contract.
 
 ## License
 

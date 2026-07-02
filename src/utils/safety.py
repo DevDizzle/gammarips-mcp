@@ -51,6 +51,14 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def redact(text: str) -> str:
+    """Apply the infra-detail redaction patterns to any string surfaced to a
+    caller (error messages, BQ column descriptions, etc.)."""
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def safe_error(exc: BaseException, op: str | None = None) -> str:
     """Render an exception for client consumption with infra details redacted.
 
@@ -65,9 +73,7 @@ def safe_error(exc: BaseException, op: str | None = None) -> str:
     """
     op = op or "tool execution"
     logger.warning("safe_error: %s failed: %r", op, exc, exc_info=True)
-    msg = str(exc) or exc.__class__.__name__
-    for pattern, replacement in _REDACT_PATTERNS:
-        msg = pattern.sub(replacement, msg)
+    msg = redact(str(exc) or exc.__class__.__name__)
     # Truncate very long error messages — long stack-y strings are usually
     # internal-detail-heavy, not user-friendly.
     if len(msg) > 240:

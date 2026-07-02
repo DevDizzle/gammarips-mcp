@@ -1,28 +1,34 @@
 """
-Overnight Edge tools for GammaRips MCP
+Overnight Edge tools for GammaRips MCP.
+
+Live-pool tools read the leakage-safe view `overnight_signals_enriched_safe`,
+which physically strips the forward-outcome columns the win-tracker merges
+back onto the raw enriched table (next_day_pct, day2/3_pct, peak_return_3d,
+is_win, outcome_tier, ...). Agents therefore can never see a candidate's
+future through these tools, on any historical date.
+
+The same-day pick tools (get_todays_pick / list_todays_picks) were REMOVED in
+V3: the engine's own daily selection is not published same-day. Realized
+receipts remain available via get_position_history / get_historical_performance.
 """
 
 import logging
 from typing import Any
 
-from google.cloud import bigquery, firestore
+from google.cloud import bigquery
 
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
 
-# Initialize clients
 try:
     client = bigquery.Client(project="profitscout-fida8")
 except Exception as e:
     logger.error(f"Failed to initialize BigQuery client: {e}")
     client = None
 
-try:
-    fs_client = firestore.Client(project="profitscout-fida8")
-except Exception as e:
-    logger.error(f"Failed to initialize Firestore client: {e}")
-    fs_client = None
+_SAFE_ENRICHED = "`profitscout-fida8.profit_scout.overnight_signals_enriched_safe`"
+_RAW_SCAN = "`profitscout-fida8.profit_scout.overnight_signals`"
 
 
 def get_overnight_signals(
@@ -33,7 +39,10 @@ def get_overnight_signals(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """
-    Returns raw overnight scanner signals for a given date.
+    Raw overnight scanner signals for a scan date — the wide net BEFORE
+    curation. Use this to see where unusual options activity concentrated
+    overnight across the full scan universe. The curated, enriched pool
+    (what the engine actually works from) is `get_enriched_signals`.
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
@@ -44,7 +53,7 @@ def get_overnight_signals(
     try:
         # Determine scan_date if not provided
         if not scan_date:
-            query = "SELECT MAX(scan_date) as max_date FROM `profitscout-fida8.profit_scout.overnight_signals`"
+            query = f"SELECT MAX(scan_date) as max_date FROM {_RAW_SCAN}"
             query_job = client.query(query)
             results = query_job.result()
             for row in results:
@@ -56,7 +65,7 @@ def get_overnight_signals(
 
         # Build query
         # Mapping fields to expected output
-        base_query = """
+        base_query = f"""
             SELECT
                 ticker,
                 direction,
@@ -66,7 +75,7 @@ def get_overnight_signals(
                 recommended_expiration as expiration,
                 recommended_strike as strike,
                 scan_date
-            FROM `profitscout-fida8.profit_scout.overnight_signals`
+            FROM {_RAW_SCAN}
             WHERE scan_date = @scan_date
         """
 
@@ -116,16 +125,20 @@ def get_enriched_signals(
     limit: int = 25,
 ) -> list[dict[str, Any]]:
     """
-    Returns AI-enriched overnight signals for a scan_date (news, technicals,
-    catalyst analysis, contract recommendation).
+    The curated candidate pool for a scan date — AI-enriched signals with
+    news, technicals, catalyst context, a delta-targeted recommended contract,
+    and (since 2026-06) the 60-day momentum feature `mom_60`.
 
-    Under V6, enrichment already gates on `overnight_score >= 4` and directional
-    UOA > $500K. This tool returns ALL rows that cleared that gate — not a further
-    score filter. The final single tradeable pick is produced downstream: the pool
-    is hard-gated to BULLISH calls and delta edge-ranked to the top ~50, two safety
-    rails apply (no earnings inside the 3-day hold; VIX <= VIX3M), and a randomized
-    3-bracket consensus tournament picks one name (or none). It is surfaced via
-    `get_todays_pick`.
+    Enrichment gate: `overnight_score >= 4` AND directional UOA > $500K, then
+    edge-ranked to the top ~50 BULLISH names. This is the pool the engine's
+    own selection works from; your agent should treat it as the daily
+    candidate set and reason to its OWN contract (see
+    get_playbook("run-your-own-tournament")).
+
+    Served from a leakage-safe view: forward-outcome columns are physically
+    stripped, so historical dates can be queried without seeing the future.
+    Liquidity caveat: `recommended_oi`/`recommended_volume` are scan-time
+    snapshots, not live values; `recommended_spread_pct` is permanently NULL.
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
@@ -135,7 +148,7 @@ def get_enriched_signals(
     try:
         # Determine scan_date if not provided
         if not scan_date:
-            query = "SELECT MAX(scan_date) as max_date FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`"
+            query = f"SELECT MAX(scan_date) as max_date FROM {_SAFE_ENRICHED}"
             query_job = client.query(query)
             results = query_job.result()
             for row in results:
@@ -143,12 +156,13 @@ def get_enriched_signals(
                 break
 
         if not scan_date:
-            return [{"error": "No data found in overnight_signals_enriched table"}]
+            return [{"error": "No data found in the enriched signals view"}]
 
-        # Build query
-        base_query = """
+        # SELECT * is safe here BECAUSE this is the guarded view — the raw
+        # table would leak win-tracker forward-outcome columns.
+        base_query = f"""
             SELECT *
-            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            FROM {_SAFE_ENRICHED}
             WHERE scan_date = @scan_date
         """
 
@@ -190,7 +204,9 @@ def get_enriched_signals(
 
 def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, Any]:
     """
-    Deep dive on a single ticker's overnight signal.
+    Deep dive on a single ticker's enriched signal — full narrative enrichment
+    (news summary, thesis, technicals, catalyst) plus the recommended contract
+    and point-in-time features. Served from the leakage-safe enriched view.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -199,9 +215,9 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
         # Determine scan_date if not provided
         if not scan_date:
             # First try to find the latest date for this specific ticker
-            query = """
+            query = f"""
                 SELECT MAX(scan_date) as max_date
-                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+                FROM {_SAFE_ENRICHED}
                 WHERE ticker = @ticker
             """
             job_config = bigquery.QueryJobConfig(
@@ -217,9 +233,9 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
             return {"error": f"No signal found for ticker {ticker}"}
 
         # Build query
-        query = """
+        query = f"""
             SELECT *
-            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            FROM {_SAFE_ENRICHED}
             WHERE ticker = @ticker AND scan_date = @scan_date
             LIMIT 1
         """
@@ -254,64 +270,12 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
         return {"error": safe_error(e, "get_signal_detail")}
 
 
-def get_todays_pick(scan_date: str | None = None) -> dict[str, Any]:
-    """
-    Returns GammaRips' canonical daily V6 pick from Firestore todays_pick/{scan_date}.
-
-    This is the single source of truth for "what did GammaRips pick today" —
-    written atomically by signal-notifier at ~07:30 ET. The same ticker appears
-    on the webapp banner, in the operator email, and (once Phase 2 ships) in the
-    WhatsApp push to paid subscribers. Do NOT re-filter the result — the doc IS
-    the answer.
-
-    Args:
-        scan_date: Filter by date (YYYY-MM-DD). Defaults to most recent.
-
-    Returns:
-        {has_pick: bool, ticker?, direction?, recommended_contract?, recommended_strike?,
-         recommended_expiration?, recommended_mid_price?, recommended_dte?,
-         overnight_score?, vol_oi_ratio?, moneyness_pct?, call_dollar_volume?,
-         put_dollar_volume?, vix3m_at_enrich?, vix_now_at_decision?,
-         decided_at, effective_at, scan_date, policy_version, skip_reason?}
-
-        When has_pick=false, skip_reason explains why: "no_candidates_passed_gates",
-        "regime_fail_closed", or "vix_backwardation".
-    """
-    if not fs_client:
-        return {"error": "Firestore client not initialized"}
-
-    try:
-        col = fs_client.collection("todays_pick")
-        if scan_date:
-            snap = col.document(scan_date).get()
-            if not snap.exists:
-                return {"error": f"No todays_pick doc for {scan_date}"}
-            data = snap.to_dict()
-        else:
-            # Most recent doc by scan_date DESC.
-            q = col.order_by("scan_date", direction=firestore.Query.DESCENDING).limit(1)
-            docs = list(q.stream())
-            if not docs:
-                return {"error": "No todays_pick docs found"}
-            data = docs[0].to_dict()
-
-        # Normalize Firestore Timestamp -> ISO8601 for JSON serialization.
-        for k, v in list(data.items()):
-            if hasattr(v, "isoformat"):
-                data[k] = v.isoformat()
-
-        return data
-
-    except Exception as e:
-        return {"error": safe_error(e, "get_todays_pick")}
-
-
 def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
     """
     Top N enriched signals for the most recent scan, with minimal fields. Used
     for public/freemium teasers: ticker, direction, score, headline, directional
-    UOA dollar volume. No contract specifics or full thesis — chat agents should
-    use get_signal_detail for that.
+    UOA dollar volume. No contract specifics or full thesis — use
+    get_signal_detail for that.
 
     Args:
         limit: How many preview rows to return (default 5, max 20).
@@ -326,16 +290,16 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
     limit = clamp(limit, 1, 20, default=5)
 
     try:
-        query = """
+        query = f"""
             WITH latest AS (
                 SELECT MAX(scan_date) as d
-                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+                FROM {_SAFE_ENRICHED}
             )
             SELECT
                 ticker, direction, overnight_score,
                 call_dollar_volume, put_dollar_volume,
                 key_headline, scan_date
-            FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
+            FROM {_SAFE_ENRICHED}
             WHERE scan_date = (SELECT d FROM latest)
             ORDER BY overnight_score DESC,
                      GREATEST(IFNULL(call_dollar_volume, 0), IFNULL(put_dollar_volume, 0)) DESC
@@ -358,63 +322,3 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
 
     except Exception as e:
         return [{"error": safe_error(e, "get_freemium_preview")}]
-
-
-def list_todays_picks(days: int = 7) -> list[dict[str, Any]]:
-    """
-    Enumerate the last N days of canonical V6 picks from Firestore todays_pick/*.
-
-    Unlike get_todays_pick (which returns only the latest doc), this tool returns a
-    chronological list so the chat agent can answer "compare today's pick to last
-    week's" or "show me the last 5 picks." Includes skip-reason entries so users
-    see the "no pick today because VIX backwardation" days too.
-
-    Args:
-        days: Lookback window in days (default 7, clamped 1-30).
-
-    Returns:
-        List of {scan_date, has_pick, ticker?, direction?, recommended_contract?,
-                 skip_reason?, effective_at?, decided_at, policy_version},
-        ordered by scan_date DESC (most recent first).
-    """
-    if not fs_client:
-        return [{"error": "Firestore client not initialized"}]
-
-    days = clamp(days, 1, 30, default=7)
-
-    try:
-        from datetime import date, timedelta
-
-        cutoff = (date.today() - timedelta(days=days)).isoformat()
-
-        q = (
-            fs_client.collection("todays_pick")
-            .where("scan_date", ">=", cutoff)
-            .order_by("scan_date", direction=firestore.Query.DESCENDING)
-        )
-
-        results = []
-        for doc in q.stream():
-            d = doc.to_dict() or {}
-            # Normalize timestamps to ISO8601 for JSON serialization.
-            for k, v in list(d.items()):
-                if hasattr(v, "isoformat"):
-                    d[k] = v.isoformat()
-            # Narrow the payload — full per-pick detail is available via get_todays_pick.
-            results.append(
-                {
-                    "scan_date": d.get("scan_date"),
-                    "has_pick": d.get("has_pick"),
-                    "ticker": d.get("ticker"),
-                    "direction": d.get("direction"),
-                    "recommended_contract": d.get("recommended_contract"),
-                    "skip_reason": d.get("skip_reason"),
-                    "effective_at": d.get("effective_at"),
-                    "decided_at": d.get("decided_at"),
-                    "policy_version": d.get("policy_version"),
-                }
-            )
-        return results
-
-    except Exception as e:
-        return [{"error": safe_error(e, "list_todays_picks")}]

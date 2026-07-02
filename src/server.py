@@ -1,6 +1,8 @@
 """
-GammaRips MCP Server
-Agent-first options trading intelligence platform
+GammaRips MCP Server (V3)
+Agent-first options-intelligence data vendor: the curated overnight pool,
+point-in-time features, realized opportunity/outcome surfaces, and the
+methodology playbooks to compose them. Primitives, never a pick.
 """
 
 import inspect
@@ -28,6 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+SERVER_VERSION = "3.0.0"
+
 # Initialize FastMCP server
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
@@ -40,443 +44,160 @@ from tools.overnight_signals import (
     get_freemium_preview,
     get_overnight_signals,
     get_signal_detail,
-    get_todays_pick,
-    list_todays_picks,
 )
 from tools.performance_tracker import (
-    get_open_position,
     get_position_history,
     get_signal_performance,
     get_win_rate_summary,
 )
+from tools.playbooks import get_playbook, list_playbooks
 from tools.reports import get_daily_report, get_report_list
+from tools.substrate import (
+    estimate_exit_rule,
+    get_opportunity_surface,
+    get_outcome_summary,
+    get_pool_features,
+    get_regime_context,
+    query_outcomes,
+)
 from tools.web_search import web_search
 
-# Register tools with the MCP server
-mcp.tool()(get_overnight_signals)
-mcp.tool()(get_enriched_signals)
-mcp.tool()(get_signal_detail)
-mcp.tool()(get_todays_pick)
-mcp.tool()(list_todays_picks)
-mcp.tool()(get_freemium_preview)
-mcp.tool()(get_signal_performance)
-mcp.tool()(get_win_rate_summary)
-mcp.tool()(get_open_position)
-mcp.tool()(get_position_history)
-mcp.tool()(get_daily_report)
-mcp.tool()(get_report_list)
-mcp.tool()(get_available_dates)
-mcp.tool()(get_enriched_signal_schema)
-mcp.tool()(web_search)
-mcp.tool()(get_market_calendar_status)
-mcp.tool()(get_signal_explainer)
-mcp.tool()(get_historical_performance)
+# Register tools with the MCP server (23 tools).
+# NOTE: docstrings are the tool descriptions — keep them agent-facing.
+_ALL_TOOLS = {
+    # live pool
+    "get_overnight_signals": get_overnight_signals,
+    "get_enriched_signals": get_enriched_signals,
+    "get_signal_detail": get_signal_detail,
+    "get_freemium_preview": get_freemium_preview,
+    # research substrate
+    "get_pool_features": get_pool_features,
+    "get_opportunity_surface": get_opportunity_surface,
+    "query_outcomes": query_outcomes,
+    "get_outcome_summary": get_outcome_summary,
+    "estimate_exit_rule": estimate_exit_rule,
+    "get_regime_context": get_regime_context,
+    # methodology
+    "list_playbooks": list_playbooks,
+    "get_playbook": get_playbook,
+    # performance / receipts
+    "get_signal_performance": get_signal_performance,
+    "get_win_rate_summary": get_win_rate_summary,
+    "get_position_history": get_position_history,
+    "get_historical_performance": get_historical_performance,
+    # reports & metadata
+    "get_daily_report": get_daily_report,
+    "get_report_list": get_report_list,
+    "get_available_dates": get_available_dates,
+    "get_enriched_signal_schema": get_enriched_signal_schema,
+    # reference / education
+    "get_market_calendar_status": get_market_calendar_status,
+    "get_signal_explainer": get_signal_explainer,
+    # external
+    "web_search": web_search,
+}
+
+for _fn in _ALL_TOOLS.values():
+    mcp.tool()(_fn)
+
+
+# ---------------------------------------------------------------------------
+# Prompts — thin orchestrations over the tools. No prompt references a pick.
+# ---------------------------------------------------------------------------
+
+
+@mcp.prompt()
+def morning_brief() -> str:
+    """Compose a morning briefing from the pool, regime, and surfaces."""
+    return (
+        "Prepare my GammaRips morning brief. Steps: "
+        "1) get_market_calendar_status — is the market open today? "
+        "2) get_regime_context — does the VIX<=VIX3M rail pass? "
+        "3) get_enriched_signals — pull today's curated pool. "
+        "4) get_outcome_summary(horizon='3d', group_by='delta_bucket') for "
+        "historical context. "
+        "Then summarize: regime state, the 5 most interesting candidates with "
+        "their contract specs and why, and any data caveats (stale OI, "
+        "illiquid tail). Do NOT recommend a single trade — present the "
+        "surface so I can reason about it."
+    )
+
+
+@mcp.prompt()
+def analyze_candidate(ticker: str) -> str:
+    """Deep-dive one pool candidate: enrichment, features, history, excursions."""
+    return (
+        f"Deep-dive the GammaRips candidate {ticker}. Steps: "
+        f"1) get_signal_detail(ticker='{ticker}') for the full enrichment. "
+        f"2) get_opportunity_surface(ticker='{ticker}', days=60) for its "
+        "recent excursion history. "
+        f"3) query_outcomes(ticker='{ticker}', horizon='3d') for realized "
+        "labels. "
+        "4) get_signal_explainer for any field you're unsure about. "
+        "Synthesize: the thesis, the quantitative profile (delta, momentum, "
+        "flow), how similar setups resolved historically, and the honest "
+        "risks. No trade recommendation — give me the decision surface."
+    )
+
+
+@mcp.prompt()
+def run_your_own_tournament() -> str:
+    """Run the bracket-tournament selection pattern over today's pool with MY objective."""
+    return (
+        "Run the GammaRips tournament selection pattern on today's pool. "
+        "First fetch get_playbook('run-your-own-tournament') and follow it "
+        "exactly: pull get_enriched_signals, shuffle into batches of <=10, "
+        "advance top-2 per batch by comparative judgment against MY objective "
+        "(ask me for horizon and risk tolerance if I haven't said), repeat to "
+        "a winner, run 3 independent brackets, and report the consensus with "
+        "confidence (3/3 high, 2/3 medium, else treat as no-selection). Show "
+        "your bracket rounds and reasoning."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Playbooks as MCP resources
+# ---------------------------------------------------------------------------
+
+
+@mcp.resource("gammarips://playbooks/{name}")
+def playbook_resource(name: str) -> str:
+    """Methodology playbook (markdown), server-versioned."""
+    result = get_playbook(name)
+    return result.get("content") or json.dumps(result)
 
 
 def get_tools_list():
-    """Return the list of available MCP tools"""
-    return [
-        {
-            "name": "get_overnight_signals",
-            "description": "Returns raw overnight scanner signals for a given date. Use this to find tickers where smart money moved overnight.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "scan_date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date.",
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["bull", "bear"],
-                        "description": "Filter by direction",
-                    },
-                    "min_score": {
-                        "type": "integer",
-                        "description": "Minimum conviction score (1-10)",
-                    },
-                    "ticker": {"type": "string", "description": "Filter by specific ticker symbol"},
-                    "limit": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Max results to return",
-                    },
+    """Tool metadata for the stateless JSON-RPC endpoint and the server card.
+
+    Generated from the FastMCP registry so descriptions/schemas have exactly
+    one source of truth (the tool docstrings) — the old hand-maintained copy
+    of this list is where stale-policy drift lived.
+    """
+    tools = []
+    for t in mcp._tool_manager.list_tools():
+        tools.append(
+            {
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.parameters,
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": t.name != "web_search",
+                    "openWorldHint": t.name == "web_search",
                 },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_enriched_signals",
-            "description": "Returns AI-enriched overnight signals for a scan_date (news, technicals, catalyst, recommended contract). The V6 enrichment gate is `overnight_score >= 4` and directional UOA > $500K. This tool returns all rows cleared by that gate — the single daily tradeable pick comes from `get_todays_pick`.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "scan_date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent scan date.",
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["bull", "bear"],
-                        "description": "Filter by direction",
-                    },
-                    "ticker": {"type": "string", "description": "Filter by specific ticker symbol"},
-                    "limit": {
-                        "type": "integer",
-                        "default": 25,
-                        "description": "Max results to return",
-                    },
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_signal_detail",
-            "description": "Deep dive on a single ticker's overnight signal. Returns full enriched signal data including recommended contract.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {"type": "string", "description": "The ticker symbol"},
-                    "scan_date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
-                    },
-                },
-                "required": ["ticker"],
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "list_todays_picks",
-            "description": "Enumerate the last N days of canonical V6 picks from Firestore. Unlike get_todays_pick (latest only), this returns a list so an agent can answer 'compare today's pick to last week's' or 'show me the last 5 picks.' Includes skip-reason entries (vix_backwardation, no_candidates_passed_gates, etc) so users see no-trade days too. Returns narrow fields (ticker, direction, contract, skip_reason, scan_date); use get_todays_pick for a single full payload.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "default": 7,
-                        "description": "Lookback window in days (clamped 1-30)",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_signal_performance",
-            "description": "How signals performed against 3-day forward returns. READS FROM `signal_performance` (enriched-signals outcome table, ~30 signals/day tracked). This is NOT the V6 paper-trader ledger — for realized V6 bracket trades use get_position_history. For aggregates use get_win_rate_summary.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "scan_date": {"type": "string", "description": "Filter by date (YYYY-MM-DD)"},
-                    "ticker": {"type": "string", "description": "Filter to specific ticker"},
-                    "direction": {
-                        "type": "string",
-                        "enum": ["bull", "bear"],
-                        "description": "Filter by direction",
-                    },
-                    "outcome": {
-                        "type": "string",
-                        "enum": ["win", "loss"],
-                        "description": "Filter by outcome",
-                    },
-                    "limit": {"type": "integer", "default": 50, "description": "Max results"},
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_win_rate_summary",
-            "description": "Aggregate win rate + average return over N days. READS FROM `signal_performance` (enriched-signals outcome table) — NOT the V6 paper-trader ledger. These are two different universes: enriched-signals track ALL signals that cleared enrichment (~30/day, 3-day forward returns), while V6 realized trades are one pick per day with a −60/+80 bracket. Always disambiguate in chat answers. For V6 realized trades, chain get_position_history.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "default": 30,
-                        "description": "Lookback period in days",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_daily_report",
-            "description": "Returns the full daily intelligence report (markdown content).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_report_list",
-            "description": "List available reports.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Number of reports to return",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_available_dates",
-            "description": "Returns which scan dates have data available.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_todays_pick",
-            "description": "Returns GammaRips' canonical daily V6 pick from Firestore todays_pick/{scan_date}. This is the single source of truth for 'what did GammaRips pick today' — do NOT re-filter. Returns {has_pick, ticker, direction, recommended_contract, recommended_strike, vix3m_at_enrich, effective_at, policy_version, skip_reason?} (some legacy fields such as vol_oi_ratio and moneyness_pct may still appear for historical rows but are no longer selection gates). When has_pick=false, skip_reason explains why (no_candidates_passed_gates | regime_fail_closed | vix_backwardation).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "scan_date": {
-                        "type": "string",
-                        "description": "Filter by date (YYYY-MM-DD). Defaults to most recent.",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_freemium_preview",
-            "description": "Top N enriched signals for the most recent scan with minimal fields (ticker, direction, score, directional UOA, headline). For public/freemium teasers; chat agents should use get_signal_detail for contract/thesis depth.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "default": 5,
-                        "description": "Number of preview rows (clamped 1-20)",
-                    }
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_open_position",
-            "description": "Returns the current V6 trade status in three pieces so a chat agent can answer 'what trade am I in right now?' honestly. IMPORTANT: the paper-trader is a BATCH simulator — it does not hold live positions in the ledger. This tool returns {pending_pick (from Firestore todays_pick — the next trade to enter at 10:00 ET), awaiting_simulation (scan_dates still inside their 3-day hold window awaiting reconciliation), most_recent_closed_trade (last ledger row with real entry + exit), explanation (plain-English narrative)}.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_position_history",
-            "description": "Realized V6 paper-trader bracket trades from the last N days, row-level. READS FROM `forward_paper_ledger` — this IS the V6 strategy (one pick per day, −60%/+80% option bracket, 3-day hold). Returns entry/exit prices, realized_return_pct, exit_reason (STOP/TARGET/TIMEOUT), plus SPY + underlying benchmark returns. Filters out INVALID_LIQUIDITY and SKIPPED. PIT-safe (exit_timestamp < today). This is the tool to chain with get_win_rate_summary when an agent needs to disambiguate enriched-outcome stats from V6 realized outcomes.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "default": 30,
-                        "description": "Lookback window in days",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Max rows (clamped 1-200)",
-                    },
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_enriched_signal_schema",
-            "description": "Returns the BigQuery column schema of overnight_signals_enriched. Chat agents use this to introspect available fields before asking 'why this pick?' without hallucinating field names.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "web_search",
-            "description": "Search the web for real-time info or to verify facts.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "num_results": {
-                        "type": "integer",
-                        "default": 5,
-                        "description": "Number of results to return",
-                    },
-                },
-                "required": ["query"],
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": False,
-                "openWorldHint": True,
-            },
-        },
-        {
-            "name": "get_market_calendar_status",
-            "description": "Returns whether the US equity market is open today, the next open/close, and holiday status. Uses NYSE calendar (pandas_market_calendars). Eliminates the chat-agent 'is the market open?' hallucination class.",
-            "inputSchema": {"type": "object", "properties": {}},
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_signal_explainer",
-            "description": "Plain-English explanation of a GammaRips signal field (e.g., premium_score, volume_oi_ratio, moneyness_pct, recommended_contract). Hardcoded lookup, no LLM, no hallucination. Use when a chat user asks 'what does X mean?' about a metric in any other tool's response.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "field_name": {
-                        "type": "string",
-                        "description": "Field name as it appears in tool responses (e.g. 'premium_score').",
-                    }
-                },
-                "required": ["field_name"],
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-        {
-            "name": "get_historical_performance",
-            "description": "Aggregate V6 paper-trader performance over a lookback window. READS FROM `forward_paper_ledger` (V6 realized bracket trades) — NOT signal_performance. Use this when a user asks 'how has GammaRips' STRATEGY performed?'. Returns total_trades, wins, losses, win_rate, avg_return, median_return, best, worst.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "lookback_days": {
-                        "type": "integer",
-                        "default": 30,
-                        "description": "Lookback window in calendar days (clamped 1-365).",
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": ["bullish", "bearish"],
-                        "description": "Optional: filter to bullish or bearish trades.",
-                    },
-                    "min_premium_score": {
-                        "type": "integer",
-                        "description": "Optional: minimum premium_score floor (0-10).",
-                    },
-                },
-            },
-            "annotations": {
-                "readOnlyHint": True,
-                "destructiveHint": False,
-                "idempotentHint": True,
-                "openWorldHint": False,
-            },
-        },
-    ]
+            }
+        )
+    return tools
 
 
 async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> str:
     """Execute a tool by name with provided arguments."""
-    tool_map = {
-        "get_overnight_signals": get_overnight_signals,
-        "get_enriched_signals": get_enriched_signals,
-        "get_signal_detail": get_signal_detail,
-        "get_todays_pick": get_todays_pick,
-        "list_todays_picks": list_todays_picks,
-        "get_freemium_preview": get_freemium_preview,
-        "get_signal_performance": get_signal_performance,
-        "get_win_rate_summary": get_win_rate_summary,
-        "get_open_position": get_open_position,
-        "get_position_history": get_position_history,
-        "get_daily_report": get_daily_report,
-        "get_report_list": get_report_list,
-        "get_available_dates": get_available_dates,
-        "get_enriched_signal_schema": get_enriched_signal_schema,
-        "web_search": web_search,
-        "get_market_calendar_status": get_market_calendar_status,
-        "get_signal_explainer": get_signal_explainer,
-        "get_historical_performance": get_historical_performance,
-    }
-
-    if tool_name not in tool_map:
+    if tool_name not in _ALL_TOOLS:
         raise ValueError(f"Tool not found: {tool_name}")
 
-    func = tool_map[tool_name]
+    func = _ALL_TOOLS[tool_name]
     try:
         # Inject user_info into kwargs for tools that need it
         # We pass it as a hidden argument _user_info
@@ -504,29 +225,37 @@ async def server_card(request: Request):
             "serverInfo": {
                 "name": "GammaRips",
                 "displayName": "GammaRips Options Intelligence",
-                "version": "1.0.0",
-                "description": "AI-powered options trading signals. Get high-conviction setups backed by fundamentals, technicals, and options flow analysis. Paper-trading performance is tracked publicly on the scorecard (https://gammarips.com/scorecard). Educational only; not investment advice.",
+                "version": SERVER_VERSION,
+                "description": (
+                    "Options-flow intelligence primitives for AI agents: a hard-"
+                    "curated overnight candidate pool, point-in-time features, "
+                    "realized opportunity surfaces (MFE/MAE excursions), bracket "
+                    "outcome labels, and methodology playbooks. Your agent reasons "
+                    "to its own contract and exit — there is no pick endpoint. "
+                    "Paper-traded research data; educational only; not investment "
+                    "advice."
+                ),
                 "homepage": "https://gammarips.com/developers",
                 "icon": "https://gammarips.com/logo.png",
             },
             "authentication": {"required": False},
             "tools": get_tools_list(),
-            "resources": [],
+            "resources": [
+                {
+                    "uriTemplate": "gammarips://playbooks/{name}",
+                    "name": "playbooks",
+                    "description": "Methodology playbooks (markdown), server-versioned.",
+                }
+            ],
             "prompts": [
                 {
-                    "name": "get_todays_signals",
-                    "description": "Get today's high-conviction options trading signals",
-                    "arguments": [
-                        {
-                            "name": "direction",
-                            "description": "Optional: 'bull' or 'bear'",
-                            "required": False,
-                        }
-                    ],
+                    "name": "morning_brief",
+                    "description": "Compose a morning briefing from the pool, regime, and surfaces",
+                    "arguments": [],
                 },
                 {
-                    "name": "analyze_ticker_signal",
-                    "description": "Get deep dive analysis for a specific ticker's signal",
+                    "name": "analyze_candidate",
+                    "description": "Deep-dive one pool candidate: enrichment, features, history, excursions",
                     "arguments": [
                         {
                             "name": "ticker",
@@ -536,8 +265,8 @@ async def server_card(request: Request):
                     ],
                 },
                 {
-                    "name": "check_performance",
-                    "description": "Check the win rate and performance of recent signals",
+                    "name": "run_your_own_tournament",
+                    "description": "Run the bracket-tournament selection pattern over today's pool with your objective",
                     "arguments": [],
                 },
             ],
@@ -548,10 +277,9 @@ async def server_card(request: Request):
 async def handle_jsonrpc(request: Request):
     """
     Stateless JSON-RPC endpoint for MCP tool discovery and direct calls.
-    Used by Smithery and other MCP clients that don't support SSE transport.
+    Used by Smithery and other MCP clients that don't support streaming
+    transports.
     """
-    # No auth check needed
-
     # Parse JSON-RPC request
     try:
         body = await request.json()
@@ -576,9 +304,9 @@ async def handle_jsonrpc(request: Request):
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {
-                    "protocolVersion": "2024-11-05",
+                    "protocolVersion": "2025-06-18",
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "gammarips-mcp", "version": "1.0.0"},
+                    "serverInfo": {"name": "gammarips-mcp", "version": SERVER_VERSION},
                 },
             }
         )
@@ -648,18 +376,29 @@ class RequestLogger(BaseHTTPMiddleware):
         return response
 
 
-# Expose ASGI app for production servers
+# Expose ASGI app for production servers.
+# Streamable HTTP (/mcp) is the primary transport; legacy SSE (/sse +
+# /messages) stays mounted for existing consumers during the deprecation
+# window; the stateless /rpc endpoints serve registry scanners.
 try:
-    if hasattr(mcp, "sse_app"):
+    app = None
+    if hasattr(mcp, "streamable_http_app"):
+        try:
+            app = mcp.streamable_http_app()
+            logger.info("Using streamable_http_app() - Streamable HTTP at /mcp (primary)")
+            try:
+                sse = mcp.sse_app()
+                app.router.routes.extend(sse.routes)
+                logger.info("Mounted legacy SSE routes (/sse, /messages)")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Legacy SSE mount failed (continuing HTTP-only): {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"streamable_http_app() failed, falling back to SSE: {e}")
+            app = None
+    if app is None and hasattr(mcp, "sse_app"):
         logger.info("Using sse_app() - SSE Transport")
         app = mcp.sse_app()
-    elif hasattr(mcp, "http_app"):
-        logger.info("Using http_app() - HTTP Transport")
-        app = mcp.http_app()
-    elif hasattr(mcp, "_http_app"):
-        logger.info("Using _http_app")
-        app = mcp._http_app
-    else:
+    if app is None:
         logger.warning("No explicit app method found, assuming mcp object is ASGI compatible")
         app = mcp
 
@@ -701,7 +440,7 @@ try:
     except Exception as e:
         logger.error(f"Failed to apply TrustedHostMiddleware patch: {e}", exc_info=True)
 
-    # Add JSON-RPC endpoint (Phase 3: Smithery Support)
+    # Add JSON-RPC endpoint (stateless; Smithery support)
     app.add_route("/rpc", handle_jsonrpc, methods=["POST"])
     app.add_route("/jsonrpc", handle_jsonrpc, methods=["POST"])
 
@@ -731,39 +470,25 @@ def main():
     logger.info("========================================")
     logger.info("GammaRips MCP Server")
     logger.info("========================================")
-    logger.info("Version: 1.0.0")
+    logger.info(f"Version: {SERVER_VERSION}")
     logger.info(f"Project ID: {os.getenv('GCP_PROJECT_ID')}")
     logger.info(f"Port: {os.getenv('PORT', '8080')}")
-    logger.info("Authentication: Disabled")
+    logger.info("Authentication: Disabled (Phase 2 adds bearer keys)")
     logger.info("========================================")
     logger.info("")
-    logger.info("Available tools:")
-    logger.info("   1. get_overnight_signals")
-    logger.info("   2. get_enriched_signals")
-    logger.info("   3. get_signal_detail")
-    logger.info("   4. get_todays_pick        (V6 canonical pick)")
-    logger.info("   5. list_todays_picks")
-    logger.info("   6. get_freemium_preview   (V6 top-N teaser)")
-    logger.info("   7. get_signal_performance")
-    logger.info("   8. get_win_rate_summary")
-    logger.info("   9. get_open_position      (V6 live position + Polygon mid)")
-    logger.info("  10. get_position_history   (V6 realized ledger)")
-    logger.info("  11. get_daily_report")
-    logger.info("  12. get_report_list")
-    logger.info("  13. get_available_dates")
-    logger.info("  14. get_enriched_signal_schema")
-    logger.info("  15. web_search")
-    logger.info("  16. get_market_calendar_status   (NEW 2026-04-27)")
-    logger.info("  17. get_signal_explainer         (NEW 2026-04-27)")
-    logger.info("  18. get_historical_performance   (NEW 2026-04-27 — V6 ledger aggregate)")
+    logger.info(f"Registered tools ({len(_ALL_TOOLS)}):")
+    for i, name in enumerate(_ALL_TOOLS, 1):
+        logger.info(f"  {i:2d}. {name}")
     logger.info("")
     logger.info("Starting server...")
 
-    # Run the server with SSE transport
-    # Host and port are configured in FastMCP initialization
     port = int(os.getenv("PORT", "8080"))
     logger.info(f"Binding to host: 0.0.0.0 and port: {port}")
-    mcp.run(transport="sse")
+    try:
+        mcp.run(transport="streamable-http")
+    except Exception:  # noqa: BLE001
+        logger.warning("streamable-http transport failed, falling back to SSE")
+        mcp.run(transport="sse")
 
 
 if __name__ == "__main__":

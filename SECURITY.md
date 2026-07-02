@@ -1,8 +1,8 @@
 # Security & Trust Model — gammarips-mcp
 
-> **Last reviewed:** 2026-04-27
+> **Last reviewed:** 2026-07-02 (V3 surface)
 > **Service URL:** `https://gammarips-mcp-406581297632.us-central1.run.app`
-> **Distribution:** public, unauthenticated, listed on Smithery
+> **Distribution:** public, unauthenticated (bearer-token tiers are Phase 2 of `docs/MCP-V3-SPEC.md`), listed on Smithery
 
 This document is the trust model for the GammaRips MCP server. It describes
 what guarantees the server makes to its consumers (chat agents, paying-customer
@@ -13,10 +13,13 @@ and how to report a vulnerability.
 
 ## Trust model in one sentence
 
-The MCP server is a **public, unauthenticated, read-only API** over the V6
-options-flow paper-trader. It returns the same data a Smithery-listed agent or
-a curious developer could see. There is no per-user data, no PII, no
-mutation surface, and no privileged identity.
+The MCP server is a **public, unauthenticated, read-only API** over the
+GammaRips options-flow engine's curated pool and research substrate. It
+returns the same data a Smithery-listed agent or a curious developer could
+see. There is no per-user data, no PII, no mutation surface, no privileged
+identity — and **no same-day pick**: the engine's own daily selection is not
+exposed (V3 removed `get_todays_pick` / `list_todays_picks` /
+`get_open_position`; only realized T+1 receipts are served).
 
 ---
 
@@ -26,11 +29,12 @@ mutation surface, and no privileged identity.
 
 Every registered tool is a read-only operation against:
 
-- BigQuery datasets `profitscout-fida8.profit_scout.*`
-- Firestore collections `todays_pick/*`, `daily_reports/*`
-- GCS bucket (read-only signed URL for `daily_reports`)
-- Polygon REST snapshot endpoint (option mid prices, read-only)
+- BigQuery datasets `profitscout-fida8.profit_scout.*` (incl. the
+  `enriched_option_outcomes` substrate and the leakage-safe views
+  `enriched_features_v1` / `overnight_signals_enriched_safe`)
+- Firestore collection `daily_reports/*`
 - Google Custom Search API (read-only, paid)
+- Local markdown playbooks vendored in the container (`content/playbooks/`)
 
 No tool has BigQuery `INSERT` / `UPDATE` / `DELETE` privileges. The Cloud Run
 service account is granted `roles/bigquery.dataViewer` and
@@ -53,8 +57,14 @@ parameters to a tight range *before* the query is built. Bounds:
 | `get_overnight_signals` | 1–50 | n/a |
 | `get_enriched_signals` | 1–50 | n/a |
 | `get_signal_detail` | n/a (single row) | n/a |
-| `list_todays_picks` | n/a | 1–30 |
 | `get_freemium_preview` | 1–20 | n/a |
+| `get_pool_features` | 1–100 | n/a |
+| `get_opportunity_surface` | hard 200 | 1–120 |
+| `query_outcomes` | 1–200 | date-range bound |
+| `get_outcome_summary` | hard 50 groups | date-range bound |
+| `estimate_exit_rule` | aggregate only | target 5–300%, stop 5–95% |
+| `get_regime_context` | n/a (single row) | n/a |
+| `list_playbooks` / `get_playbook` | local files, name-regex `[a-z0-9-]{1,64}` | n/a |
 | `get_signal_performance` | 1–50 | n/a |
 | `get_win_rate_summary` | n/a | 1–365 |
 | `get_position_history` | 1–200 | 1–365 |
@@ -63,7 +73,7 @@ parameters to a tight range *before* the query is built. Bounds:
 | `web_search` | num_results 1–10 | query ≤ 500 chars |
 | `get_market_calendar_status` | n/a | 14-day forward window |
 | `get_signal_explainer` | n/a (single dict) | n/a |
-| `get_enriched_signal_schema` | whitelisted columns only | n/a |
+| `get_enriched_signal_schema` | classification metadata only | n/a |
 
 The `MAX_RESPONSE_ROWS = 200` constant in `src/utils/safety.py` is a final
 backstop applied across the codebase.
@@ -98,15 +108,25 @@ which strips:
 Full untruncated errors are still logged server-side at WARNING for engineering
 triage. Clients see only a short, infra-redacted message.
 
-### 6. Schema introspection is whitelisted
+### 6. Leakage-safe data views (lookahead defense for consumers)
 
-`get_enriched_signal_schema` returns column metadata from BigQuery's
-`INFORMATION_SCHEMA`, but filtered to a static **whitelist of public-safe
-columns** maintained in `src/tools/metadata.py::_PUBLIC_SCHEMA_COLUMNS`.
+Consumer agents can never see a candidate's future through the pool tools:
 
-When new internal-only columns are added to `overnight_signals_enriched`
-(debug fields, experimental cohort tags, vendor PII, etc.), they do **not**
-auto-leak via this tool. They must be explicitly added to the whitelist.
+- Live-pool tools read `overnight_signals_enriched_safe`, which physically
+  strips the forward-outcome columns the win-tracker merges back onto the raw
+  enriched table (`next_day_pct`, `day2/3_pct`, `peak_return_3d`, `is_win`,
+  `outcome_tier`, ...). Historical dates are safe to query.
+- Feature tools read `enriched_features_v1`, an explicit **allowlist** view —
+  new/unclassified columns are absent until deliberately classified in, so
+  the failure mode is a missing column, never a leaked one.
+- Realized data (labels, opportunity surface, receipts) is served only for
+  **closed** windows (exit / window-end strictly before today).
+
+`get_enriched_signal_schema` publishes the machine-readable per-column
+classification (`feature | label | opportunity | regime_telemetry |
+identity` with as-of boundaries) so consumer agents can enforce the same
+discipline in their own research. Column descriptions pass through the same
+redaction filter as error messages before being surfaced.
 
 ---
 
@@ -135,8 +155,9 @@ If quota becomes a real-money problem we will: (a) add a daily per-IP cap on
 
 ### Loss of confidentiality on paying-customer data
 
-There is none. The MCP server has no per-user data. `todays_pick` and the
-ledger are organization-wide truths surfaced to all consumers identically.
+There is none. The MCP server has no per-user data. The pool, substrate, and
+ledger receipts are organization-wide truths surfaced to all consumers
+identically.
 
 ### Authentication / authorization
 
@@ -164,4 +185,5 @@ We will reply within 48h on weekdays.
 
 | Date | Change |
 |---|---|
+| 2026-07-02 | **V3 surface.** Removed same-day pick tools (`get_todays_pick`, `list_todays_picks`, `get_open_position`). Live-pool tools moved to the leakage-safe `overnight_signals_enriched_safe` view (raw table leaked win-tracker forward-outcome columns on historical dates). Added substrate tools (`get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`) and playbooks. Schema tool now serves the column-classification data contract. Streamable HTTP `/mcp` primary transport. Polygon snapshot dependency removed. |
 | 2026-04-27 | Initial SECURITY.md. Sanitized errors, clamped limits, rate-limit middleware, schema whitelist. Added `get_market_calendar_status`, `get_signal_explainer`, `get_historical_performance`. Bot-isolation context (gammarips-bot agent, sandboxed) added by gammarips-engineer Claude session. |

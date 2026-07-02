@@ -1,5 +1,10 @@
 # PROMPT: Enable MCP Server Authentication
 
+> **SUPERSEDED (2026-07-02):** This doc assumes an `src/auth/` module that no longer exists
+> in the tree and stores key hashes on the webapp `users` collection. The current auth design
+> (fresh build: `mcp_api_keys/{sha256}` collection, bearer tokens, tiers, shadow rollout) is
+> Phase 2 of `docs/MCP-V3-SPEC.md`.
+
 ## Objective
 Enable paid-only API access on the GammaRips MCP server. Users must have an active subscription to use the API.
 

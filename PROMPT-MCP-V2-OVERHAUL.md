@@ -1,5 +1,9 @@
 # PROMPT: GammaRips MCP Server v2 — Full Tool Overhaul
 
+> **SUPERSEDED (2026-07-02):** This V2 overhaul was executed and is now historical. The
+> "free, no-auth" posture and V6-era tool set described below are no longer the target.
+> Current spec: `docs/MCP-V3-SPEC.md` (paid-MCP data-vendor surface + token auth).
+
 ## Context
 
 The GammaRips MCP server (`/home/user/gammarips-mcp`) needs a complete tool overhaul. The current 19 tools were built for an old product that did live analysis and full-universe data ingestion. That product is dead. We now run an **Overnight Edge** pipeline that:
