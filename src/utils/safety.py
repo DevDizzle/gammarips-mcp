@@ -9,8 +9,8 @@ response. These helpers ensure that:
      stack-trace paths) never leak in error messages.
   2. All caller-controlled `limit` / `days` / `lookback` parameters are clamped
      to bounded ranges before they reach BigQuery (cost-attack defense).
-  3. Tool responses are size-bounded (`MAX_RESPONSE_ROWS`) regardless of any
-     individual tool's clamp logic.
+  3. Tool responses are size-bounded: every per-tool row limit is defined
+     against the `MAX_RESPONSE_ROWS` convention (all clamps/LIMITs <= 200).
 """
 
 from __future__ import annotations
