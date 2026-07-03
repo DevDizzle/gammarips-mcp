@@ -23,6 +23,7 @@ from utils.auth import (
     anon_tools,
     denied_error,
     get_auth_mode,
+    resolve_identity,
     tool_allowed,
 )
 from utils.safety import RateLimitMiddleware, redact
@@ -346,23 +347,24 @@ async def handle_jsonrpc(request: Request):
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
 
-        # Defense-in-depth: the AccessGateMiddleware already gated this request,
-        # but re-check here against the identity it resolved so a parser
-        # divergence between the body-sniff and this handler can't slip a pro
-        # tool through under enforce.
-        identity = getattr(request.state, "identity", None)
-        if (
-            identity is not None
-            and get_auth_mode() == "enforce"
-            and not tool_allowed(tool_name, identity.tier)
-        ):
-            return JSONResponse(
-                content={
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": denied_error(tool_name),
-                }
-            )
+        # Defense-in-depth: the AccessGateMiddleware already gated this request.
+        # Re-check under enforce so a parser divergence between the body-sniff
+        # and this handler can't slip a pro tool through. If the middleware
+        # didn't resolve an identity (e.g. it missed the tool call), resolve it
+        # here rather than falling through ungated — otherwise the guard would
+        # fail open in exactly the case it exists for.
+        if get_auth_mode() == "enforce":
+            identity = getattr(request.state, "identity", None)
+            if identity is None:
+                identity = resolve_identity(request.headers)
+            if not tool_allowed(tool_name, identity.tier):
+                return JSONResponse(
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": denied_error(tool_name),
+                    }
+                )
 
         try:
             result = await execute_tool(tool_name, tool_args, None)
