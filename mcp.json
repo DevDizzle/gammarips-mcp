@@ -3,7 +3,13 @@
   "description": "Options-flow intelligence primitives for AI agents: a hard-curated overnight candidate pool, point-in-time features, realized opportunity surfaces (MFE/MAE excursions), bracket outcome labels, and methodology playbooks. Your agent reasons to its own contract and exit — no pick endpoint. Paper-traded research data; educational only; not investment advice.",
   "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
   "legacy_sse_url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
-  "auth": { "type": "none" },
+  "auth": {
+    "type": "bearer",
+    "header": "Authorization",
+    "scheme": "Bearer",
+    "note": "Free-tier tools work without a key. Pro tools require a GammaRips API key (gr_live_...) sent as 'Authorization: Bearer <key>'. Enforcement rolls out via shadow->enforce; get a key at https://gammarips.com/pricing.",
+    "pricing_url": "https://gammarips.com/pricing"
+  },
   "tools": [
     "get_overnight_signals",
     "get_enriched_signals",

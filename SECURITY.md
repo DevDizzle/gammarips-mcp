@@ -157,11 +157,11 @@ sees the origin domain.
 ### Cost amplification by sustained low-volume polling
 
 The rate limiter caps request *velocity*, not aggregate request *count*. An
-attacker willing to sustain 9 requests/min for hours can drive ~13K
-`web_search` calls per day, charged against our Google CSE quota.
-
-If quota becomes a real-money problem we will: (a) add a daily per-IP cap on
-`web_search`, (b) move CSE behind a paid-tier API key with billing alerts.
+attacker willing to sustain 9 requests/min for hours can drive many
+`web_search` calls per day, charged against our Google CSE quota. Under
+**enforce** mode this is largely closed — `web_search` is pro-only, so an
+anon attacker can't reach it at all. Until then, mitigations are the per-IP
+velocity limit plus the process-wide `web_search` token bucket.
 
 ### Loss of confidentiality on paying-customer data
 
@@ -169,11 +169,43 @@ There is none. The MCP server has no per-user data. The pool, substrate, and
 ledger receipts are organization-wide truths surfaced to all consumers
 identically.
 
-### Authentication / authorization
+### Authentication / authorization (Phase 2)
 
-There is none. Per the project's distribution model the MCP is intentionally
-public. If we ever ship per-customer tools (e.g., a user's saved picks), they
-will live behind a separate authenticated service, not in this MCP.
+Bearer-token auth + tool tiering (`src/utils/auth.py`, `AccessGateMiddleware`):
+
+- **Keys:** `gr_live_<32 hex>`, sent as `Authorization: Bearer <key>` (or
+  `X-API-Key`). Resolved by `sha256(key)` → Firestore `mcp_api_keys/{hash}` →
+  `{uid, tier, status}`. Plaintext keys are never stored (the doc id is the
+  hash). **The MCP only READS this collection** — the webapp owns key issuance
+  and Stripe status sync, so the read-only trust model is intact.
+- **Tiers:** an `anon` free funnel set (teaser + published-free reports +
+  playbooks + pure reference) is usable without a key; everything else
+  (`pro` — pool, features, surfaces, outcomes, replay, regime, receipts,
+  `web_search`) requires an active key. Tier is on every tool in the server
+  card. `web_search` is pro-only (it spends paid CSE quota). The anon set is
+  env-overridable (`ANON_TOOLS`).
+- **Resolution is fail-closed on privilege, fail-open on availability:** an
+  unknown, malformed, revoked, or unverifiable key resolves to `anon` (never
+  pro), and a Firestore blip degrades to `anon` rather than 500-ing — a
+  transient outage cannot grant privilege, and never caches a failure.
+  Positive lookups cache 300s, negatives 60s.
+- **Staged rollout (env, no code redeploy to flip):**
+  `REQUIRE_API_KEY=true` → **enforce**; `AUTH_SHADOW=true` (with require false)
+  → **shadow** (resolves + logs would-be denials, blocks nothing); neither →
+  **off**. Deployed in **shadow** first so nothing breaks before the webapp
+  issues keys; flip to enforce once keys exist; rollback is an env flip.
+- **Denials** return a JSON-RPC error (`code: subscription_required`) with the
+  pricing + developers URLs, so a blocked agent can tell its human how to
+  upgrade. Discovery (`initialize`, `tools/list`, resources, prompts) is never
+  gated — anon agents see the full catalog, pro tools included.
+- **Metering:** one structured `MCP_TOOL_CALL` log event per tool call
+  (`uid, key_prefix, tool, tier, decision, mode`) → a Cloud Logging sink → BQ
+  `mcp_analytics` (one-time GCP setup) does the analytics. No BQ writes from
+  the service.
+
+Limitation: JSON-RPC **batch** tool calls are not tier-gated (single calls
+are); batching is rare for tool invocations and falls through to normal
+handling.
 
 ---
 
@@ -195,5 +227,6 @@ We will reply within 48h on weekdays.
 
 | Date | Change |
 |---|---|
+| 2026-07-02 | **Phase 2 auth.** Bearer keys (`gr_live_*` → Firestore `mcp_api_keys/{sha256}`, MCP reads only), anon/pro tool tiering, fail-closed-on-privilege resolution with TTL cache, staged shadow→enforce rollout (env-flagged), structured `subscription_required` denials, `MCP_TOOL_CALL` metering. Deployed in SHADOW. |
 | 2026-07-02 | **V3 surface.** Removed same-day pick tools (`get_todays_pick`, `list_todays_picks`, `get_open_position`). Live-pool tools moved to the leakage-safe `overnight_signals_enriched_safe` view (raw table leaked win-tracker forward-outcome columns on historical dates). Added substrate tools (`get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`) and playbooks. Schema tool now serves the column-classification data contract. Streamable HTTP `/mcp` primary transport. Polygon snapshot dependency removed. |
 | 2026-04-27 | Initial SECURITY.md. Sanitized errors, clamped limits, rate-limit middleware, schema whitelist. Added `get_market_calendar_status`, `get_signal_explainer`, `get_historical_performance`. Bot-isolation context (gammarips-bot agent, sandboxed) added by gammarips-engineer Claude session. |

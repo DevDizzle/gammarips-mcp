@@ -10,7 +10,10 @@
 #   * Secrets are mounted from Secret Manager via --set-secrets (NOT plain env).
 #     Setting these as plain env vars would clobber the secret mounts and break
 #     Polygon + Google search.
-#   * REQUIRE_API_KEY=false is the live auth posture. Do not flip to true here.
+#   * Auth posture (Phase 2): REQUIRE_API_KEY=false + AUTH_SHADOW=true = SHADOW
+#     mode — resolves keys + logs would-be denials, blocks nothing. Flip
+#     REQUIRE_API_KEY=true to ENFORCE (only AFTER the webapp issues keys). To
+#     roll back, set REQUIRE_API_KEY=false. Do NOT enforce until keys exist.
 #   * BIGQUERY_DATASET / GCS_BUCKET_NAME / *_TABLE values are CODE DEFAULTS, not
 #     env vars on the live service — intentionally not set here.
 
@@ -45,7 +48,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --concurrency=80 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="REQUIRE_API_KEY=false" \
+    --set-env-vars="REQUIRE_API_KEY=false,AUTH_SHADOW=true" \
     --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_CSE_ID=GOOGLE_CSE_ID:latest"
 
 echo ""
