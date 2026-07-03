@@ -38,10 +38,12 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "implied-vol regime."
         ),
         "how_used": (
-            "V6 enrichment requires score ≥ 4; the daily pick is chosen from this "
-            "pool after the BULLISH-only gate, a delta edge-rank to the top ~50, "
-            "two safety rails (no earnings in the 3-day hold; VIX ≤ VIX3M), and a "
-            "randomized 3-bracket consensus tournament."
+            "Enrichment requires score ≥ 4; the engine's own daily selection is "
+            "drawn from this pool after the BULLISH-only gate, a delta edge-rank "
+            "to the top ~50, two safety rails (no earnings in the exclusion "
+            "window; VIX ≤ VIX3M), and a randomized 3-bracket consensus "
+            "tournament (a pattern your agent can run itself — see "
+            "get_playbook('run-your-own-tournament'))."
         ),
     },
     "premium_score": {
@@ -123,17 +125,16 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         "definition": "Expiration date of the recommended contract.",
         "how_used": (
             "Picked to land DTE in the 7-14 day window — short enough for "
-            "convexity, long enough to survive the 3-day hold without theta "
-            "ramp."
+            "convexity, long enough that theta doesn't dominate a short hold."
         ),
     },
     "recommended_dte": {
         "label": "DTE (Days To Expiration)",
         "definition": "Calendar days from the recommended_expiration to scan_date.",
         "how_used": (
-            "V6 enrichment targets a short DTE (roughly 7-14 days). Below ~7 → "
-            "theta ramp dominates in the 3-day hold. Well above that → wastes "
-            "capital on time the strategy doesn't need."
+            "Enrichment targets a short DTE (roughly 7-14 days). Below ~7 → "
+            "theta ramp dominates even a short hold. Well above → wastes "
+            "capital on time a short-horizon trade doesn't need."
         ),
     },
     "recommended_mid_price": {
@@ -183,9 +184,10 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         "label": "VIX3M (at enrichment time)",
         "definition": "Forward 3-month VIX at the moment of enrichment (~05:30 ET on the entry date).",
         "how_used": (
-            "V6 regime safety rail: signal-notifier requires VIX(now) ≤ VIX3M. "
+            "Regime safety rail: the engine requires VIX(now) ≤ VIX3M. "
             "Backwardation (spot > forward) means traders are pricing imminent "
-            "vol → adverse regime for our 3-day directional trade."
+            "vol → adverse regime for short-dated directional longs. See "
+            "get_regime_context."
         ),
     },
     "vix_now_at_decision": {
@@ -208,6 +210,130 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         "label": "Key Headline",
         "definition": "Short news headline (when present) the enrichment pipeline associated with this name.",
         "how_used": "Optional context only — does NOT factor into the gate or the pick decision.",
+    },
+    "mom_60": {
+        "label": "60-Day Momentum",
+        "definition": (
+            "Underlying price momentum over the trailing ~60 trading days, as a "
+            "fraction (0.35 = +35%). Point-in-time-guarded: both anchor and "
+            "lookback dates are <= scan_date."
+        ),
+        "how_used": (
+            "A research lever, not a rule: historically mom_60 ≥ +0.35 combined "
+            "with mid-|delta| 0.20-0.46 beat the bullish baseline UNDER THE 3-DAY "
+            "horizon, with no edge under the same-day bracket. Exit-conditional — "
+            "validate on your own horizon via query_outcomes before leaning on it."
+        ),
+    },
+    "opp_peak_return": {
+        "label": "Opportunity Peak (MFE)",
+        "definition": (
+            "Max FAVORABLE excursion: the highest the option premium traded above "
+            "the 10:00 ET entry cost basis during the 3-trading-day window, as a "
+            "fraction (0.40 = +40%). No exit rule applied."
+        ),
+        "how_used": (
+            "The core of the opportunity surface — profit POTENTIAL with the exit "
+            "left free. Realized post-entry: never use as a selection feature. "
+            "See get_opportunity_surface and get_playbook('exit-lab')."
+        ),
+    },
+    "opp_trough_return": {
+        "label": "Opportunity Trough (MAE)",
+        "definition": (
+            "Max ADVERSE excursion: the lowest the option premium traded below the "
+            "entry cost basis during the 3-trading-day window, as a fraction "
+            "(-0.30 = -30%). No exit rule applied."
+        ),
+        "how_used": (
+            "Bounds the pain any exit rule must survive. Realized post-entry: "
+            "never use as a selection feature."
+        ),
+    },
+    "opp_status": {
+        "label": "Opportunity Surface Status",
+        "definition": (
+            "State of the excursion computation: OK (window closed, MFE/MAE "
+            "final), WINDOW_OPEN (still inside the 3-day window), NO_BARS / "
+            "INVALID_LIQUIDITY (no tradeable prints), and error states."
+        ),
+        "how_used": "Only opp_status='OK' rows have final excursions; tools default to them.",
+    },
+    "realized_return_pct": {
+        "label": "Same-Day Bracket Label",
+        "definition": (
+            "Realized option return, as a FRACTION, under the live same-day GIGO "
+            "bracket: enter 10:00 ET the day after scan, +40% target / -30% stop, "
+            "flat 15:45 ET. TIMEOUT > STOP > TARGET on ambiguous bars."
+        ),
+        "how_used": (
+            "The canonical same-day label for research (query_outcomes horizon="
+            "'same_day') and the paper cohort's realized result in the receipts. "
+            "A LABEL — realized post-entry, never a selection input."
+        ),
+    },
+    "realized_return_pct_3d": {
+        "label": "3-Day Bracket Label",
+        "definition": (
+            "Realized option return, as a FRACTION, under the legacy 3-trading-day "
+            "companion bracket: +80% target / -60% stop, exit 15:50 ET on day 3."
+        ),
+        "how_used": (
+            "A separate label horizon (query_outcomes horizon='3d') — never pool "
+            "or compare it with same-day labels. Where the mom_60 x delta research "
+            "lead lives."
+        ),
+    },
+    "vix_at_scan": {
+        "label": "VIX (as-of scan date)",
+        "definition": "Spot VIX close as-of the scan date — known before any entry decision.",
+        "how_used": (
+            "The leakage-safe regime FEATURE (vs oc_* telemetry, which is entry-"
+            "day close and realized after the trade). Compared against "
+            "vix3m_at_enrich for the regime rail. See get_regime_context."
+        ),
+    },
+    "spy_trend_at_scan": {
+        "label": "SPY Trend State (as-of scan date)",
+        "definition": "Categorical SPY trend regime (e.g. above/below key moving averages) as-of the scan date.",
+        "how_used": "Point-in-time regime feature for conditioning research; not a hard gate.",
+    },
+    "illiquid_exit": {
+        "label": "Illiquid Exit Flag",
+        "definition": (
+            "TRUE when the simulated exit had no tradeable print near the exit "
+            "time, so the label is unreliable."
+        ),
+        "how_used": (
+            "Excluded from EV/aggregate tools by default (exclusion counts are "
+            "reported in meta). The illiquid tail (~28% of the pool) is "
+            "non-random — always report it alongside conclusions."
+        ),
+    },
+    "exit_slippage": {
+        "label": "Exit Slippage",
+        "definition": "Fill-realism haircut applied at the simulated exit, as a fraction of premium.",
+        "how_used": (
+            "Part of why exact bracket labels sit below raw opportunity-surface "
+            "estimates (the surface applies entry slippage only)."
+        ),
+    },
+    "recommended_oi": {
+        "label": "Open Interest (scan-time snapshot)",
+        "definition": (
+            "PRIOR-SESSION open interest for the recommended contract, frozen at "
+            "scan time. NOT live OI — overnight sweeps typically become visible "
+            "OI only the next morning."
+        ),
+        "how_used": (
+            "A point-in-time feature but a STALE liquidity signal. Re-check live "
+            "liquidity with your own feed before sizing a real trade."
+        ),
+    },
+    "recommended_volume": {
+        "label": "Contract Volume (scan-time snapshot)",
+        "definition": "Cumulative session volume for the recommended contract, frozen at scan time.",
+        "how_used": "Same staleness caveat as recommended_oi — feature, not live liquidity.",
     },
 }
 

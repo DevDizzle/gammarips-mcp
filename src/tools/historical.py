@@ -1,14 +1,16 @@
 """
 Historical performance tool for GammaRips MCP.
 
-Reads from `forward_paper_ledger` — the V6 paper-trader's realized bracket
-trades (one pick per day, −60%/+80% bracket, 3-day hold). This is distinct
-from `get_win_rate_summary` which reads `signal_performance` (the enriched-
-signal outcome table, ALL signals, not just the daily V6 pick).
+Reads from `forward_paper_ledger` — the engine's realized OPTION paper trades
+(one tournament pick per day, simulated with real fills under the bracket
+policy live at the time). This is distinct from `get_win_rate_summary`, which
+reads `signal_performance` (UNDERLYING-stock direction outcomes for the broad
+enriched pool — not option PnL).
 
-Chat agents should use this tool when a user asks "how has GammaRips' STRATEGY
-done in the last 30 days?" — the realized strategy track record, not the
-broader enriched-signals universe.
+Cohort discipline: the ledger is truncated at each policy cutover and rows
+carry `policy_version`. Aggregates default to the LIVE cohort only
+(`V7_1_TILTED_GIGO`, since 2026-06-26) — mixing exit policies in one
+aggregate produces nonsense.
 """
 
 from __future__ import annotations
@@ -29,23 +31,34 @@ except Exception as e:  # noqa: BLE001
     logger.error(f"Failed to initialize BigQuery client: {e}")
     client = None
 
+LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
+
 
 def get_historical_performance(
     lookback_days: int = 30,
     direction: str | None = None,
     min_premium_score: int | None = None,
+    policy_version: str | None = LIVE_POLICY_VERSION,
 ) -> dict[str, Any]:
     """
-    Aggregate V6 paper-trader performance over a lookback window.
+    Aggregate realized paper-trading performance (the engine's RECEIPTS) over
+    a lookback window — one tournament pick per day, real-fill simulation.
 
-    READS FROM `forward_paper_ledger` — V6 realized trades only. Skips
-    `INVALID_LIQUIDITY` and `SKIPPED` rows (terminal but uninformative). PIT-safe:
-    only rows where exit_timestamp < today.
+    Defaults to the LIVE cohort (`V7_1_TILTED_GIGO`, since 2026-06-26: enter
+    10:00 ET day after scan, +40% target / -30% stop, flat 15:45 ET same day).
+    The cohort is young — expect small N; small-N aggregates are noise-heavy
+    and should be quoted with their N. Pass policy_version="all" to see all
+    eras (different exit mechanics — comparison is on you).
+
+    Realized-only: rows appear after exit, never same-day. All returns are
+    FRACTIONS of entry premium (0.40 = +40%). Paper-traded. Not investment
+    advice.
 
     Args:
         lookback_days: Lookback window in calendar days (default 30, clamped 1-365).
         direction: Optional filter — "bullish" or "bearish" (case-insensitive).
         min_premium_score: Optional integer floor on premium_score (0-6 typical).
+        policy_version: Cohort filter (default = live cohort; "all" for every era).
 
     Returns:
         {
@@ -53,12 +66,12 @@ def get_historical_performance(
           "wins": int,                  # realized_return_pct > 0
           "losses": int,                # realized_return_pct <= 0
           "win_rate": float,            # 0.0-1.0
-          "avg_return": float,          # mean of realized_return_pct
+          "avg_return": float,          # mean of realized_return_pct (FRACTION)
           "median_return": float,
-          "best": float,                # max realized_return_pct
-          "worst": float,               # min realized_return_pct
-          "period": str,                # human-readable lookback summary
-          "filters": {direction, min_premium_score, lookback_days},
+          "best": float,
+          "worst": float,
+          "period": str,
+          "filters": {direction, min_premium_score, lookback_days, policy_version},
         }
     """
     if not client:
@@ -87,14 +100,14 @@ def get_historical_performance(
             """
             SELECT
                 ticker, direction, premium_score, realized_return_pct, exit_reason,
-                scan_date, entry_timestamp, exit_timestamp
+                scan_date, entry_timestamp, exit_timestamp, policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
             WHERE exit_timestamp IS NOT NULL
-              AND DATE(exit_timestamp) < CURRENT_DATE()
+              AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL
               AND exit_reason NOT IN ('INVALID_LIQUIDITY', 'SKIPPED')
               AND IFNULL(is_skipped, FALSE) = FALSE
-              AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @lookback DAY)
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @lookback DAY)
             """
         ]
         params: list = [
@@ -106,6 +119,9 @@ def get_historical_performance(
         if score_filter is not None:
             query_parts.append(" AND IFNULL(premium_score, 0) >= @min_score")
             params.append(bigquery.ScalarQueryParameter("min_score", "INT64", score_filter))
+        if policy_version and policy_version.lower() != "all":
+            query_parts.append(" AND policy_version = @policy_version")
+            params.append(bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version))
 
         query = (
             "\n".join(query_parts)
@@ -115,6 +131,7 @@ def get_historical_performance(
         job = client.query(query, job_config=bigquery.QueryJobConfig(query_parameters=params))
         rows = list(job.result())
 
+        cohort_label = policy_version or "all"
         if not rows:
             return {
                 "total_trades": 0,
@@ -130,6 +147,7 @@ def get_historical_performance(
                     "direction": dir_filter,
                     "min_premium_score": score_filter,
                     "lookback_days": lookback_days,
+                    "policy_version": cohort_label,
                 },
             }
 
@@ -152,12 +170,17 @@ def get_historical_performance(
             "median_return": round(median, 4),
             "best": round(best, 4),
             "worst": round(worst, 4),
-            "period": f"last {lookback_days} days, V6 realized bracket trades",
+            "period": f"last {lookback_days} days, realized paper trades, cohort={cohort_label}",
             "filters": {
                 "direction": dir_filter,
                 "min_premium_score": score_filter,
                 "lookback_days": lookback_days,
+                "policy_version": cohort_label,
             },
+            "note": (
+                "Returns are FRACTIONS of entry premium. Realized rows only. "
+                "Paper-traded. Not investment advice."
+            ),
         }
 
     except Exception as e:

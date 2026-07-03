@@ -1,13 +1,21 @@
 """
-Metadata tools for GammaRips MCP
+Metadata tools for GammaRips MCP.
+
+`get_enriched_signal_schema` serves the substrate's MACHINE-READABLE column
+classification: every column of the outcome/label table carries a description
+of the form `[classification | as-of BOUNDARY] text`, with classification in
+{feature, label, opportunity, regime_telemetry, identity}. An agent can (and
+should) refuse to use any non-`feature` column as a selection input — see
+get_playbook("leakage-and-data-contract").
 """
 
 import logging
+import re
 from typing import Any
 
 from google.cloud import bigquery
 
-from utils.safety import safe_error
+from utils.safety import redact, safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -18,31 +26,28 @@ except Exception as e:
     logger.error(f"Failed to initialize BigQuery client: {e}")
     client = None
 
-
-# Whitelist of public-safe columns for `get_enriched_signal_schema`. Future
-# internal-only columns added to overnight_signals_enriched (debug fields,
-# experimental cohort tags, vendor PII, etc.) won't auto-leak via the schema
-# tool — they have to be added here explicitly.
-_PUBLIC_SCHEMA_COLUMNS: tuple[str, ...] = (
-    "scan_date",
-    "ticker",
-    "direction",
-    "overnight_score",
-    "volume_oi_ratio",
-    "moneyness_pct",
-    "recommended_contract",
-    "recommended_strike",
-    "recommended_expiration",
-    "recommended_mid_price",
-    "recommended_dte",
-    "recommended_spread_pct",
-    "call_dollar_volume",
-    "put_dollar_volume",
-    "key_headline",
-    "vix3m_at_enrich",
-    "vix_now_at_decision",
-    "is_premium_signal",
+_TAG_RE = re.compile(
+    r"^\[(?P<classification>feature|label|opportunity|regime_telemetry|identity)"
+    r"\s*\|\s*as-of\s*(?P<as_of>[^\]]+)\]\s*(?P<text>.*)$",
+    re.IGNORECASE | re.DOTALL,
 )
+
+_VOCABULARY = {
+    "identity": "Join keys / contract spec. Known as-of <= scan_date. Not signals.",
+    "feature": (
+        "Point-in-time inputs, known as-of <= scan_date (the selection point). "
+        "The ONLY class safe to use in selection logic."
+    ),
+    "label": "Realized bracket outcomes (post-entry). Predict these; never condition on them.",
+    "opportunity": (
+        "Exit-free realized excursions (opp_* MFE/MAE surface, post-entry). "
+        "Research surface, not a feature."
+    ),
+    "regime_telemetry": (
+        "Entry-day-close regime values (oc_*), realized AFTER the same-day "
+        "trade. Telemetry only — using them as features is lookahead."
+    ),
+}
 
 
 def get_available_dates() -> list[dict[str, Any]]:
@@ -78,45 +83,68 @@ def get_available_dates() -> list[dict[str, Any]]:
         return [{"error": safe_error(e, "get_available_dates")}]
 
 
-def get_enriched_signal_schema() -> list[dict[str, Any]]:
+def get_enriched_signal_schema() -> dict[str, Any]:
     """
-    Returns the column schema of overnight_signals_enriched (BigQuery), filtered
-    to a whitelist of public-safe columns. Chat agents use this to introspect
-    available fields when answering "why this pick?" questions without
-    hallucinating field names.
+    The substrate DATA CONTRACT, machine-readable: every column of the
+    outcome/label substrate with its leakage classification and as-of
+    boundary, plus the exact column set exposed by the point-in-time features
+    view (what `get_pool_features` serves).
 
-    Future internal columns added to the underlying table do NOT auto-leak via
-    this tool — they must be added explicitly to `_PUBLIC_SCHEMA_COLUMNS`.
+    Classifications: identity | feature | label | opportunity |
+    regime_telemetry. Only `feature` columns are safe as selection inputs —
+    everything else is realized after the selection point. Use this tool to
+    ground research code instead of hallucinating field names, and see
+    get_playbook("leakage-and-data-contract") for the rules in prose.
 
     Returns:
-        List of {column_name, data_type, is_nullable}, ordered by ordinal_position.
+        {vocabulary, features_view_columns: [...],
+         columns: [{column, data_type, classification, as_of, description}]}
     """
     if not client:
-        return [{"error": "BigQuery client not initialized"}]
+        return {"error": "BigQuery client not initialized"}
 
     try:
-        query = """
-            SELECT column_name, data_type, is_nullable
-            FROM `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMNS`
-            WHERE table_name = 'overnight_signals_enriched'
-              AND column_name IN UNNEST(@allowed)
-            ORDER BY ordinal_position
+        class_query = """
+            SELECT p.column_name, c.data_type, p.description
+            FROM `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` p
+            JOIN `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMNS` c
+              ON c.table_name = p.table_name AND c.column_name = p.column_name
+            WHERE p.table_name = 'enriched_option_outcomes'
+            ORDER BY c.ordinal_position
         """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ArrayQueryParameter("allowed", "STRING", list(_PUBLIC_SCHEMA_COLUMNS)),
-            ]
-        )
-        results = []
-        for row in client.query(query, job_config=job_config).result():
-            results.append(
+        columns = []
+        for row in client.query(class_query).result():
+            desc = row.description or ""
+            m = _TAG_RE.match(desc)
+            columns.append(
                 {
-                    "column_name": row.column_name,
+                    "column": row.column_name,
                     "data_type": row.data_type,
-                    "is_nullable": row.is_nullable,
+                    "classification": m.group("classification").lower() if m else "untagged",
+                    "as_of": m.group("as_of").strip() if m else None,
+                    "description": redact(m.group("text").strip() if m else desc),
                 }
             )
-        return results
+
+        view_query = """
+            SELECT column_name
+            FROM `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMNS`
+            WHERE table_name = 'enriched_features_v1'
+            ORDER BY ordinal_position
+        """
+        view_cols = [row.column_name for row in client.query(view_query).result()]
+
+        return {
+            "vocabulary": _VOCABULARY,
+            "features_view_columns": view_cols,
+            "features_view_note": (
+                "The allowlist view served by get_pool_features — the only "
+                "columns that may feed selection logic. Columns classified "
+                "'feature' below but absent here are pending allowlist "
+                "activation and will appear automatically once classified in."
+            ),
+            "columns": columns,
+        }
 
     except Exception as e:
-        return [{"error": safe_error(e, "get_enriched_signal_schema")}]
+        return {"error": safe_error(e, "get_enriched_signal_schema")}

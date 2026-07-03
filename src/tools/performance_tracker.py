@@ -1,12 +1,24 @@
 """
-Performance tracking tools for GammaRips MCP
+Performance tracking tools for GammaRips MCP.
+
+Two DIFFERENT outcome universes live here — never conflate them:
+
+  * `signal_performance` (get_signal_performance / get_win_rate_summary) —
+    UNDERLYING-STOCK directional outcomes for the broad enriched pool
+    (~30 signals/day, 3-day forward window). "Was the direction call right"
+    — NOT option PnL. Direction being right (~54%) does not mean the option
+    made money (~41%).
+  * `forward_paper_ledger` (get_position_history) — the engine's realized
+    OPTION paper trades: one tournament pick per day, simulated with real
+    fills under the live bracket policy. These are the receipts.
+
+V3 removed `get_open_position`: the engine's pending selection is not
+published same-day. Only realized (closed) rows are served.
 """
 
 import logging
-import os
 from typing import Any
 
-import httpx
 from google.cloud import bigquery
 
 from utils.safety import clamp, safe_error
@@ -20,45 +32,15 @@ except Exception as e:
     logger.error(f"Failed to initialize BigQuery client: {e}")
     client = None
 
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "").strip() or None
+# The live paper-cohort policy label. Earlier cohorts used different exit
+# mechanics — mixing them in one aggregate produces nonsense.
+LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
 
-
-def _polygon_option_mid(contract: str) -> float | None:
-    """Return the current mid price for a Polygon option contract (e.g.
-    "O:FIX260515C01780000"). Returns None on any failure or when POLYGON_API_KEY
-    is not mounted — callers must handle None gracefully."""
-    if not POLYGON_API_KEY or not contract:
-        return None
-    try:
-        # Underlying is embedded in the OCC-style contract; Polygon's
-        # snapshot endpoint takes underlying + option symbol.
-        # e.g. O:FIX260515C01780000 -> underlying "FIX"
-        if contract.startswith("O:"):
-            tail = contract[2:]
-            # ticker chars until the first digit
-            underlying = ""
-            for ch in tail:
-                if ch.isdigit():
-                    break
-                underlying += ch
-        else:
-            underlying = contract.split(":")[0]
-
-        url = f"https://api.polygon.io/v3/snapshot/options/{underlying}/{contract}"
-        resp = httpx.get(url, params={"apiKey": POLYGON_API_KEY}, timeout=5.0)
-        resp.raise_for_status()
-        data = resp.json().get("results") or {}
-        lq = data.get("last_quote") or {}
-        bid, ask = lq.get("bid"), lq.get("ask")
-        if bid is not None and ask is not None and ask > 0:
-            return round((bid + ask) / 2, 4)
-        # Fallback to last trade if quote not available
-        lt = data.get("last_trade") or {}
-        price = lt.get("price")
-        return float(price) if price is not None else None
-    except Exception as e:
-        logger.warning(f"Polygon option snapshot failed for {contract}: {e}")
-        return None
+_UNDERLYING_UNIVERSE_NOTE = (
+    "UNDERLYING-STOCK directional outcomes (~30 enriched signals/day, 3-day "
+    "forward window) — NOT option PnL. For realized option trades use "
+    "get_position_history / get_historical_performance."
+)
 
 
 def get_signal_performance(
@@ -67,9 +49,16 @@ def get_signal_performance(
     direction: str | None = None,
     outcome: str | None = None,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """
-    Track how signals actually performed against market outcomes.
+    UNDERLYING-STOCK directional outcomes for the broad enriched pool — did
+    the direction call work on the stock over the 3-day forward window?
+
+    This is NOT option PnL. On the same pool, the underlying moving the right
+    way (~54%) does not mean the option made money (~41%) — theta, IV and the
+    exit bracket eat the difference. For realized OPTION trades use
+    `get_position_history`; for the full-pool option labels use
+    `query_outcomes`.
 
     Args:
         scan_date: Filter by date (YYYY-MM-DD).
@@ -79,10 +68,11 @@ def get_signal_performance(
         limit: Max results (default 50).
 
     Returns:
-        Performance records with: ticker, direction, score, entry_price, current_price, pnl_pct, outcome, scan_date.
+        {universe, note, rows: [{ticker, direction, score, entry_price,
+         current_price, pnl_pct, outcome, scan_date}]}
     """
     if not client:
-        return [{"error": "BigQuery client not initialized"}]
+        return {"error": "BigQuery client not initialized"}
 
     limit = clamp(limit, 1, 50, default=50)
 
@@ -124,28 +114,39 @@ def get_signal_performance(
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(base_query, job_config=job_config)
 
-        results = []
+        rows = []
         for row in query_job.result():
             r = dict(row)
             # Add 'outcome' string field for compatibility
             r["outcome"] = "WIN" if r.get("is_win") else "LOSS"
-            results.append(r)
+            rows.append(r)
 
-        return results
+        return {
+            "universe": "underlying_direction",
+            "note": _UNDERLYING_UNIVERSE_NOTE,
+            "row_count": len(rows),
+            "rows": rows,
+        }
 
     except Exception as e:
-        return [{"error": safe_error(e, "get_signal_performance")}]
+        return {"error": safe_error(e, "get_signal_performance")}
 
 
 def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
     """
-    Aggregate performance statistics.
+    Aggregate UNDERLYING-STOCK direction statistics for the broad enriched
+    pool over a lookback window.
+
+    This win rate answers "how often was the direction call right on the
+    STOCK" — it is NOT an option-PnL win rate and NOT the paper-trading track
+    record. For those use `get_historical_performance` (realized option
+    trades) or `get_outcome_summary` (full-pool option labels).
 
     Args:
         days: Lookback period in days (default 30).
 
     Returns:
-        Summary statistics object.
+        Summary statistics object with universe marker.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -225,193 +226,55 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
         if bear_total > 0:
             result["bear_win_rate"] = round((result.get("bear_wins", 0) / bear_total) * 100, 2)
 
+        result["universe"] = "underlying_direction"
+        result["underlying_direction_win_rate"] = result["win_rate"]
+        result["note"] = _UNDERLYING_UNIVERSE_NOTE
         return result
 
     except Exception as e:
         return {"error": safe_error(e, "get_win_rate_summary")}
 
 
-def get_open_position() -> dict[str, Any]:
-    """
-    Returns the current V6 trade status across three surfaces that together
-    answer 'what trade am I in right now?' for a chat agent.
-
-    IMPORTANT — the forward-paper-trader is a BATCH simulator that only writes
-    ledger rows AFTER the 3-day hold window closes. There is no "currently-open
-    position" in the ledger by design; every ledger row is terminal. Instead of
-    inventing one, this tool returns three orthogonal pieces the chat agent can
-    narrate:
-
-      1. pending_pick — the signal-notifier's most recent decision from Firestore
-         `todays_pick/{scan_date}`. This is the next trade that will be entered
-         at 10:00 ET the following trading day (if has_pick=true), or a skip
-         with reason if the V6 gates didn't clear.
-      2. awaiting_simulation — scan_dates between the last simulated scan and
-         today that are still inside their 3-day hold window and have NOT yet
-         been reconciled into the ledger.
-      3. most_recent_closed_trade — the latest ledger row with a real entry fill
-         and a real exit. Gives the chat agent something concrete to reference
-         when a user asks 'how did the last one do?'
-
-    Returns:
-        {
-          "explanation": str,                    # plain-English summary the
-                                                 # chat agent can paraphrase
-          "pending_pick": {...} | None,          # from Firestore todays_pick
-          "awaiting_simulation": [scan_date,...],# scan_dates still in hold
-          "most_recent_closed_trade": {...} | None,
-        }
-    """
-    if not client:
-        return {"error": "BigQuery client not initialized"}
-
-    result: dict[str, Any] = {
-        "explanation": None,
-        "pending_pick": None,
-        "awaiting_simulation": [],
-        "most_recent_closed_trade": None,
-    }
-
-    # --- 1. pending_pick from Firestore todays_pick/{latest scan_date} ---
-    try:
-        from google.cloud import firestore as _fs  # local to avoid hard coupling
-
-        fs = _fs.Client(project="profitscout-fida8")
-        docs = list(
-            fs.collection("todays_pick")
-            .order_by("scan_date", direction=_fs.Query.DESCENDING)
-            .limit(1)
-            .stream()
-        )
-        if docs:
-            d = docs[0].to_dict() or {}
-            for k, v in list(d.items()):
-                if hasattr(v, "isoformat"):
-                    d[k] = v.isoformat()
-            result["pending_pick"] = d
-    except Exception as e:
-        logger.warning(f"pending_pick Firestore read failed: {e}")
-
-    # --- 2. awaiting_simulation — scan_dates in enriched but not yet in ledger ---
-    try:
-        q = """
-            WITH enriched_dates AS (
-                SELECT DISTINCT scan_date
-                FROM `profitscout-fida8.profit_scout.overnight_signals_enriched`
-                WHERE scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 DAY)
-            ),
-            ledgered AS (
-                SELECT DISTINCT scan_date
-                FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
-                WHERE scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 DAY)
-            )
-            SELECT e.scan_date
-            FROM enriched_dates e
-            LEFT JOIN ledgered l USING (scan_date)
-            WHERE l.scan_date IS NULL
-            ORDER BY e.scan_date DESC
-        """
-        result["awaiting_simulation"] = [str(row.scan_date) for row in client.query(q).result()]
-    except Exception as e:
-        logger.warning(f"awaiting_simulation query failed: {e}")
-
-    # --- 3. most_recent_closed_trade (real entry + real exit, V6 only) ---
-    try:
-        q = """
-            SELECT
-                scan_date, ticker, direction, recommended_contract,
-                entry_price, target_price, stop_price,
-                entry_timestamp, exit_timestamp,
-                exit_reason, realized_return_pct,
-                underlying_entry_price, underlying_exit_price,
-                underlying_return, spy_return_over_window,
-                policy_version
-            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
-            WHERE entry_price IS NOT NULL
-              AND exit_timestamp IS NOT NULL
-              AND exit_reason NOT IN ("INVALID_LIQUIDITY", "SKIPPED")
-              AND policy_version = "V5_3_TARGET_80"
-            ORDER BY exit_timestamp DESC
-            LIMIT 1
-        """
-        for row in client.query(q).result():
-            r = dict(row)
-            for k, v in list(r.items()):
-                if hasattr(v, "isoformat"):
-                    r[k] = v.isoformat()
-            result["most_recent_closed_trade"] = r
-            break
-    except Exception as e:
-        logger.warning(f"most_recent_closed_trade query failed: {e}")
-
-    # --- 4. narrative explanation for the chat agent ---
-    parts = []
-    pp = result["pending_pick"]
-    if pp and pp.get("has_pick"):
-        parts.append(
-            f"Next trade: {pp.get('ticker')} {pp.get('direction')} "
-            f"({pp.get('recommended_contract')}), entry at {pp.get('effective_at')}."
-        )
-    elif pp:
-        parts.append(
-            f"No next trade — {pp.get('skip_reason') or 'no pick'} for scan {pp.get('scan_date')}."
-        )
-    else:
-        parts.append("No pending pick found in Firestore todays_pick.")
-
-    if result["awaiting_simulation"]:
-        parts.append(
-            f"{len(result['awaiting_simulation'])} scan_date(s) awaiting simulator "
-            f"reconciliation (within 3-day hold): {', '.join(result['awaiting_simulation'])}."
-        )
-
-    mr = result["most_recent_closed_trade"]
-    if mr:
-        parts.append(
-            f"Last closed trade: {mr.get('ticker')} {mr.get('direction')} on "
-            f"{mr.get('scan_date')} → {mr.get('exit_reason')} "
-            f"at {mr.get('realized_return_pct')}%."
-        )
-    else:
-        parts.append("No closed V6 trades yet in the ledger.")
-
-    parts.append(
-        "Reminder: the paper-trader is a batch simulator. There is no live "
-        "open position in the ledger by design."
-    )
-
-    result["explanation"] = " ".join(parts)
-    return result
-
-
 def get_position_history(
     days: int = 30,
     limit: int = 50,
-) -> list[dict[str, Any]]:
+    policy_version: str | None = LIVE_POLICY_VERSION,
+) -> dict[str, Any]:
     """
-    Returns realized (closed) V6 paper trades from the last N days, row-level,
-    for chat-agent answers like "show me recent wins/losses" or "how did FIX do".
-    PIT-safe: only rows where exit_timestamp IS NOT NULL AND DATE(exit_timestamp)
-    < today (no intraday-open rows).
+    The RECEIPTS — realized (closed) paper trades from the engine's own daily
+    selection, row-level. One tournament pick per day, simulated with real
+    fills under the bracket policy live at the time.
+
+    Realized-only by construction: rows appear only after the trade's exit,
+    never same-day, so this tool cannot front-run the engine's private
+    selection. No-trade days are reported separately in `skip_days` (they are
+    part of the honest track record); invalid-liquidity rows are excluded.
+
+    Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-06-26): enter 10:00 ET
+    the day after scan, +40% target / -30% stop, flat 15:45 ET same day.
+    Earlier policy_version cohorts used different exits — do not mix cohorts
+    when computing aggregates.
 
     Args:
-        days: Lookback window in trading-day-equivalents (default 30).
+        days: Lookback window in days (default 30, clamped 1-365).
         limit: Max rows (default 50, clamped 1-200).
+        policy_version: Cohort filter (default = the live cohort). Pass "all"
+            to see every era — comparison across eras is on you.
 
     Returns:
-        List of {scan_date, ticker, direction, recommended_contract, entry_price,
-                 exit_price, realized_return_pct, exit_reason, entry_timestamp,
-                 exit_timestamp, policy_version}.
+        {policy_version, row_count, rows: [{scan_date, ticker, direction,
+         recommended_contract, entry/target/stop prices, realized_return_pct,
+         exit_reason, benchmarks, timestamps, policy_version}]}
     """
     if not client:
-        return [{"error": "BigQuery client not initialized"}]
+        return {"error": "BigQuery client not initialized"}
 
     days = clamp(days, 1, 365, default=30)
     limit = clamp(limit, 1, 200, default=50)
 
     try:
-        # Columns verified against BQ INFORMATION_SCHEMA on 2026-04-20 — there is
-        # no `exit_price` column; the ledger encodes outcome via realized_return_pct
+        # Columns verified against BQ INFORMATION_SCHEMA — there is no
+        # `exit_price` column; the ledger encodes outcome via realized_return_pct
         # on the option premium and underlying_exit_price on the stock leg.
         # Also exclude INVALID_LIQUIDITY rows (contract had zero bars at 10:00 ET
         # day-1 so entry_price is NULL — these are terminal but uninformative).
@@ -425,29 +288,72 @@ def get_position_history(
                 entry_timestamp, exit_timestamp, policy_version
             FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
             WHERE exit_timestamp IS NOT NULL
-              AND DATE(exit_timestamp) < CURRENT_DATE()
+              AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL
               AND exit_reason NOT IN ("INVALID_LIQUIDITY", "SKIPPED")
-              AND scan_date >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)
               AND IFNULL(is_skipped, FALSE) = FALSE
+        """
+        query_params = [
+            bigquery.ScalarQueryParameter("days", "INTEGER", days),
+        ]
+        if policy_version and policy_version.lower() != "all":
+            query += " AND policy_version = @policy_version"
+            query_params.append(
+                bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
+            )
+        query += """
             ORDER BY exit_timestamp DESC
             LIMIT @limit
         """
-        job_config = bigquery.QueryJobConfig(
-            query_parameters=[
-                bigquery.ScalarQueryParameter("days", "INTEGER", days),
-                bigquery.ScalarQueryParameter("limit", "INTEGER", limit),
-            ]
-        )
+        query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
 
-        results = []
+        job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+
+        rows = []
         for row in client.query(query, job_config=job_config).result():
             r = dict(row)
             for k, v in list(r.items()):
                 if hasattr(v, "isoformat"):
                     r[k] = v.isoformat()
-            results.append(r)
-        return results
+            rows.append(r)
+
+        # Skip days are the honesty signal for fail-closed days (regime rail,
+        # no candidates) — surface them alongside the trades, past days only.
+        skip_query = """
+            SELECT CAST(scan_date AS STRING) AS scan_date, skip_reason
+            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+            WHERE IFNULL(is_skipped, FALSE) = TRUE
+              AND scan_date < CURRENT_DATE('America/New_York')
+              AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)
+        """
+        skip_params = [bigquery.ScalarQueryParameter("days", "INTEGER", days)]
+        if policy_version and policy_version.lower() != "all":
+            skip_query += " AND policy_version = @policy_version"
+            skip_params.append(
+                bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
+            )
+        skip_query += " ORDER BY scan_date DESC LIMIT 100"
+        skip_days = [
+            dict(row)
+            for row in client.query(
+                skip_query, job_config=bigquery.QueryJobConfig(query_parameters=skip_params)
+            ).result()
+        ]
+
+        return {
+            "policy_version": policy_version or "all",
+            "row_count": len(rows),
+            "rows": rows,
+            "skip_days": skip_days,
+            "note": (
+                "Realized rows only (exit strictly before today, ET). "
+                "realized_return_pct is a FRACTION of entry premium. skip_days "
+                "lists no-trade days (fail-closed regime rail, no candidates) — "
+                "they are part of the honest track record. "
+                "Paper-traded. Not investment advice."
+            ),
+        }
 
     except Exception as e:
-        return [{"error": safe_error(e, "get_position_history")}]
+        return {"error": safe_error(e, "get_position_history")}

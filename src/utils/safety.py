@@ -9,8 +9,8 @@ response. These helpers ensure that:
      stack-trace paths) never leak in error messages.
   2. All caller-controlled `limit` / `days` / `lookback` parameters are clamped
      to bounded ranges before they reach BigQuery (cost-attack defense).
-  3. Tool responses are size-bounded (`MAX_RESPONSE_ROWS`) regardless of any
-     individual tool's clamp logic.
+  3. Tool responses are size-bounded: every per-tool row limit is defined
+     against the `MAX_RESPONSE_ROWS` convention (all clamps/LIMITs <= 200).
 """
 
 from __future__ import annotations
@@ -28,9 +28,34 @@ from starlette.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 
-# Hard global cap on rows returned to a single tool call. Per-tool clamps
-# should be tighter than this; this is the last-resort backstop.
+# Hard cap on rows returned by a single tool call. Every per-tool `limit`
+# clamp and hard LIMIT is defined as <= this constant (convention enforced by
+# code review + the smoke suite, not a runtime wrapper).
 MAX_RESPONSE_ROWS = 200
+
+
+class GlobalToolBucket:
+    """Process-wide token bucket for a single expensive tool, independent of
+    transport. The per-IP middleware only sees the stateless /rpc paths; tool
+    calls arriving over Streamable HTTP or SSE would otherwise bypass the
+    stricter per-tool limit. Phase 2 replaces this with per-key budgets."""
+
+    def __init__(self, per_min: float, burst_multiplier: float = 1.5):
+        self.capacity = per_min * burst_multiplier
+        self.refill = per_min / 60.0  # tokens per second
+        self.tokens = self.capacity
+        self.last_refill = time.monotonic()
+        self._lock = Lock()
+
+    def try_consume(self) -> bool:
+        with self._lock:
+            now = time.monotonic()
+            self.tokens = min(self.capacity, self.tokens + (now - self.last_refill) * self.refill)
+            self.last_refill = now
+            if self.tokens >= 1.0:
+                self.tokens -= 1.0
+                return True
+            return False
 
 
 # Patterns we redact from any string surfaced to the caller. Order matters —
@@ -51,6 +76,14 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def redact(text: str) -> str:
+    """Apply the infra-detail redaction patterns to any string surfaced to a
+    caller (error messages, BQ column descriptions, etc.)."""
+    for pattern, replacement in _REDACT_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
 def safe_error(exc: BaseException, op: str | None = None) -> str:
     """Render an exception for client consumption with infra details redacted.
 
@@ -65,9 +98,7 @@ def safe_error(exc: BaseException, op: str | None = None) -> str:
     """
     op = op or "tool execution"
     logger.warning("safe_error: %s failed: %r", op, exc, exc_info=True)
-    msg = str(exc) or exc.__class__.__name__
-    for pattern, replacement in _REDACT_PATTERNS:
-        msg = pattern.sub(replacement, msg)
+    msg = redact(str(exc) or exc.__class__.__name__)
     # Truncate very long error messages — long stack-y strings are usually
     # internal-detail-heavy, not user-friendly.
     if len(msg) > 240:
@@ -129,6 +160,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             lambda: _Bucket(self.search_capacity)
         )
         self._lock = Lock()
+        self._requests_since_evict = 0
+
+    # Buckets are per-IP dicts with no natural bound — an attacker spraying
+    # spoofed X-Forwarded-For values could grow them without limit. Evict
+    # entries idle > 10 minutes, checked every 5k requests.
+    _EVICT_EVERY = 5000
+    _EVICT_IDLE_SECONDS = 600.0
+
+    def _maybe_evict(self) -> None:
+        self._requests_since_evict += 1
+        if self._requests_since_evict < self._EVICT_EVERY:
+            return
+        self._requests_since_evict = 0
+        cutoff = time.monotonic() - self._EVICT_IDLE_SECONDS
+        for buckets in (self._buckets_default, self._buckets_search):
+            stale = [ip for ip, b in buckets.items() if b.last_refill < cutoff]
+            for ip in stale:
+                del buckets[ip]
 
     def _client_ip(self, request: Request) -> str:
         # Cloud Run terminates TLS at the LB; X-Forwarded-For carries the real
@@ -170,6 +219,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 pass
 
         with self._lock:
+            self._maybe_evict()
             if is_search:
                 bucket = self._buckets_search[ip]
                 ok = self._consume(bucket, self.search_refill, self.search_capacity)
