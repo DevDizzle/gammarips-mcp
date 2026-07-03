@@ -12,7 +12,11 @@ Every trading morning GammaRips scans the US options market for unusual institut
 - **SSE (legacy, deprecation window):** `https://gammarips-mcp-406581297632.us-central1.run.app/sse`
 - **Stateless JSON-RPC:** `https://gammarips-mcp-406581297632.us-central1.run.app/jsonrpc`
 - **Server card:** `https://gammarips-mcp-406581297632.us-central1.run.app/.well-known/mcp/server-card.json`
-- **Auth:** none today. Bearer-token auth for paid tiers is Phase 2 of `docs/MCP-V3-SPEC.md`.
+- **Auth:** bearer-token tiering (Phase 2). Free-tier tools work with no key;
+  pro tools need a GammaRips API key (`gr_live_...`) sent as
+  `Authorization: Bearer <key>`. Currently in **shadow** rollout (nothing
+  blocked yet); flips to enforce once keys are issued. Get one at
+  [gammarips.com/pricing](https://gammarips.com/pricing).
 
 ## Available tools (23)
 
@@ -60,7 +64,12 @@ Every trading morning GammaRips scans the US options market for unusual institut
 ### Claude Code
 
 ```bash
+# Free tier (no key):
 claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+
+# Pro (with your key):
+claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp \
+  --header "Authorization: Bearer gr_live_your_key"
 ```
 
 ### Generic MCP config

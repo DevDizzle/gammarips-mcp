@@ -18,6 +18,14 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from utils.auth import (
+    AccessGateMiddleware,
+    anon_tools,
+    denied_error,
+    get_auth_mode,
+    resolve_identity,
+    tool_allowed,
+)
 from utils.safety import RateLimitMiddleware, redact
 
 # Load environment variables
@@ -174,6 +182,7 @@ def get_tools_list():
     one source of truth (the tool docstrings) — the old hand-maintained copy
     of this list is where stale-policy drift lived.
     """
+    anon = anon_tools()
     tools = []
     for t in mcp._tool_manager.list_tools():
         tools.append(
@@ -181,6 +190,7 @@ def get_tools_list():
                 "name": t.name,
                 "description": t.description,
                 "inputSchema": t.parameters,
+                "tier": "anon" if t.name in anon else "pro",
                 "annotations": {
                     "readOnlyHint": True,
                     "destructiveHint": False,
@@ -238,7 +248,21 @@ async def server_card(request: Request):
                 "homepage": "https://gammarips.com/developers",
                 "icon": "https://gammarips.com/logo.png",
             },
-            "authentication": {"required": False},
+            "authentication": {
+                # `required` reflects the live rollout mode: true only once
+                # REQUIRE_API_KEY is flipped on. Anon tools stay usable without
+                # a key regardless; pro tools need one under enforce.
+                "required": get_auth_mode() == "enforce",
+                "type": "bearer",
+                "scheme": "Bearer",
+                "description": (
+                    "Send a GammaRips API key (gr_live_...) as "
+                    "'Authorization: Bearer <key>' (or X-API-Key). Free tier "
+                    "tools are usable without a key; pro tools require an active "
+                    "subscription. Get a key at https://gammarips.com/pricing."
+                ),
+                "pricing_url": "https://gammarips.com/pricing",
+            },
             "tools": get_tools_list(),
             "resources": [
                 {
@@ -323,6 +347,25 @@ async def handle_jsonrpc(request: Request):
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
 
+        # Defense-in-depth: the AccessGateMiddleware already gated this request.
+        # Re-check under enforce so a parser divergence between the body-sniff
+        # and this handler can't slip a pro tool through. If the middleware
+        # didn't resolve an identity (e.g. it missed the tool call), resolve it
+        # here rather than falling through ungated — otherwise the guard would
+        # fail open in exactly the case it exists for.
+        if get_auth_mode() == "enforce":
+            identity = getattr(request.state, "identity", None)
+            if identity is None:
+                identity = resolve_identity(request.headers)
+            if not tool_allowed(tool_name, identity.tier):
+                return JSONResponse(
+                    content={
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": denied_error(tool_name),
+                    }
+                )
+
         try:
             result = await execute_tool(tool_name, tool_args, None)
 
@@ -402,8 +445,16 @@ try:
         logger.warning("No explicit app method found, assuming mcp object is ASGI compatible")
         app = mcp
 
-    # Add middleware
+    # Add middleware. Execution order is outer->inner: CORS, RateLimit,
+    # AccessGate, RequestLogger (add order is LIFO — last added is outermost).
     app.add_middleware(RequestLogger)
+
+    # Phase 2 auth + tiering. Runs INSIDE the rate limiter so a bogus-key flood
+    # is 429'd before it can trigger a Firestore lookup / cache insert. Modes:
+    # off (passthrough) | shadow (log would-be denials, block nothing) |
+    # enforce (deny pro tools without a valid key). Env-gated by
+    # REQUIRE_API_KEY / AUTH_SHADOW so rollout + rollback are a flag flip.
+    app.add_middleware(AccessGateMiddleware)
 
     # Per-IP token-bucket rate limiter — defends the paid Google CSE tool
     # and BQ cost surface against unauthenticated abuse. Limits are
@@ -473,7 +524,8 @@ def main():
     logger.info(f"Version: {SERVER_VERSION}")
     logger.info(f"Project ID: {os.getenv('GCP_PROJECT_ID')}")
     logger.info(f"Port: {os.getenv('PORT', '8080')}")
-    logger.info("Authentication: Disabled (Phase 2 adds bearer keys)")
+    logger.info(f"Auth mode: {get_auth_mode()}  (off | shadow | enforce)")
+    logger.info(f"Anon-tier tools ({len(anon_tools())}): {sorted(anon_tools())}")
     logger.info("========================================")
     logger.info("")
     logger.info(f"Registered tools ({len(_ALL_TOOLS)}):")

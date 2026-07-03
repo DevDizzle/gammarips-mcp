@@ -143,7 +143,7 @@ All read paths per invariant #3. All date params `YYYY-MM-DD`; all limits clampe
 ### 3.2 Enforcement
 - `AuthMiddleware` (ahead of the rate limiter, all transports incl. `/mcp`, `/sse`, `/rpc`): extract `Authorization: Bearer …` (accept `X-API-Key` alias) → SHA-256 → Firestore lookup with in-process TTL cache (300s positive / 60s negative) → attach `user_info = {uid, tier}` (or `tier: "anon"`).
 - Per-tool gating in `execute_tool` + a FastMCP wrapper via a single `TOOL_TIERS` map:
-  - **`anon` (free):** `get_freemium_preview`, `get_market_calendar_status`, `get_signal_explainer`, `get_available_dates`, `get_daily_report`, `get_report_list`, `list_playbooks`, `get_playbook("start-here")`.
+  - **`anon` (free):** `get_freemium_preview`, `get_market_calendar_status`, `get_signal_explainer`, `get_available_dates`, `get_daily_report`, `get_report_list`, `list_playbooks`, `get_playbook` (all playbooks — methodology is marketing).
   - **`pro` (paid key):** everything else — pool, features, surfaces, outcomes, replay, regime, full playbooks, receipts, `web_search`.
 - Denials return a structured, friendly error (`code: subscription_required`, docs + pricing URL) — an agent hitting the wall should be able to tell its human exactly how to upgrade.
 - `REQUIRE_API_KEY` staged rollout: `false` → **shadow mode** (`AUTH_SHADOW=true`: log would-be denials, block nothing) → `true`. Rollback = flip env var.
@@ -185,6 +185,22 @@ The MCP side requires exactly this from the webapp:
 3. `web_search`: pro-only (recommended) vs tightened anon — decide in Phase 2.
 4. Anonymous access to `get_overnight_signals` (raw scan feeds the free SEO pages — recommend **keep anon**, it's already public on the site) — decide in Phase 2.
 5. Pricing/tier naming — out of scope here; single `pro` tier assumed.
+
+## 8. Phase 2 implementation status (2026-07-02)
+Landed on branch `mcp-v3-phase2`: `src/utils/auth.py` (`AccessGateMiddleware` +
+identity resolution + TTL cache + tiering + metering), wired ahead of the rate
+limiter in `server.py`; server card advertises bearer auth + per-tool `tier`;
+`scripts/issue_api_key.py` (dev/webapp-parity key mint/revoke);
+`tests/test_phase2_auth.py` (19/19, incl. live enforce over `/rpc` and `/mcp`).
+Owner decisions resolved: **#3 `web_search` = pro-only**; **#4 `get_overnight_signals` = pro**
+(deviates from the earlier "keep anon" lean — the raw scan is on the free SEO
+site for humans, but programmatic access is the paid product; env-overridable
+via `ANON_TOOLS`). **Deployed in SHADOW** (`AUTH_SHADOW=true`,
+`REQUIRE_API_KEY=false`) — blocks nothing until the webapp (Phase 3) issues
+keys; flip `REQUIRE_API_KEY=true` to enforce. Remaining for the auth flip:
+Phase 3 webapp (key issuance UI + Stripe status sync + Firestore rules) and the
+Cloud Logging→BQ `mcp_analytics` sink (one-time `gcloud` step). Per-key rate
+limits + OAuth 2.1 remain Phase 2b.
 
 ## 7. Phase 1 implementation status (2026-07-02)
 Landed on branch `mcp-v3-phase1`: all 23 tools, 3 prompts, playbook resources, Streamable HTTP `/mcp` primary + legacy `/sse` + stateless `/rpc`, registry-generated tool list (single source of truth = docstrings), 6 playbooks in `content/playbooks/`, smoke suite `tests/test_v3_smoke.py` (27/27 incl. leakage + negative tests), README/SECURITY/mcp.json updated. Verified end-to-end over the real MCP protocol against live BigQuery.
