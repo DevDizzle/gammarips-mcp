@@ -203,9 +203,11 @@ Bearer-token auth + tool tiering (`src/utils/auth.py`, `AccessGateMiddleware`):
   `mcp_analytics` (one-time GCP setup) does the analytics. No BQ writes from
   the service.
 
-Limitation: JSON-RPC **batch** tool calls are not tier-gated (single calls
-are); batching is rare for tool invocations and falls through to normal
-handling.
+Both single and **batch** JSON-RPC `tools/call` requests are gated — a batched
+pro call cannot slip past the gate (every element is evaluated; under enforce
+the batch is denied if any element is disallowed). The `/rpc` handler also
+re-checks tier against the middleware-resolved identity (defense-in-depth
+against a body-sniff/handler parser divergence).
 
 ---
 

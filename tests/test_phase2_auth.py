@@ -26,11 +26,17 @@ PRO_HASH = auth.hash_key(PRO_KEY)
 REVOKED_KEY = "gr_live_" + "b" * 32
 
 
+# active doc but NO tier field — must NOT resolve to pro (fail-closed)
+NOTIER_KEY = "gr_live_" + "d" * 32
+
+
 def _fake_lookup(key_hash: str):
     if key_hash == PRO_HASH:
         return {"uid": "user_123", "tier": "pro", "status": "active"}
     if key_hash == auth.hash_key(REVOKED_KEY):
         return {"uid": "user_456", "tier": "pro", "status": "revoked"}
+    if key_hash == auth.hash_key(NOTIER_KEY):
+        return {"uid": "user_789", "status": "active"}  # tier missing
     return None
 
 
@@ -48,6 +54,10 @@ def _reset(monkey_env: dict | None = None):
 def _make_client():
     async def rpc(request):
         body = await request.json()
+        if isinstance(body, list):
+            return JSONResponse(
+                [{"jsonrpc": "2.0", "id": it.get("id"), "result": {"ok": True}} for it in body]
+            )
         return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"), "result": {"ok": True}})
 
     app = Starlette(routes=[Route("/rpc", rpc, methods=["POST"])])
@@ -63,6 +73,15 @@ def _call(client, tool, key=None):
         headers=headers,
     )
     return r.json()
+
+
+def _call_batch(client, tools, key=None):
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    batch = [
+        {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": t}}
+        for i, t in enumerate(tools)
+    ]
+    return client.post("/rpc", json=batch, headers=headers).json()
 
 
 def run_all():
@@ -91,6 +110,9 @@ def run_all():
         check("resolve_revoked", rev.tier == "anon" and rev.reason == "revoked")
         unknown = auth.resolve_identity(H({"authorization": "Bearer gr_live_" + "c" * 32}))
         check("resolve_unknown", unknown.tier == "anon" and unknown.reason == "not_found")
+        # active doc, missing tier -> must NOT be pro (fail-closed on privilege)
+        notier = auth.resolve_identity(H({"authorization": f"Bearer {NOTIER_KEY}"}))
+        check("resolve_missing_tier_not_pro", notier.tier == "anon", f"({notier.tier})")
 
         # lookup failure must degrade to anon, not raise
         def _boom(_):
@@ -139,6 +161,21 @@ def run_all():
         check("enforce_pro_tool_with_key_ok", allowed.get("result") is not None)
         rev_call = _call(client, "get_pool_features", key=REVOKED_KEY)
         check("enforce_revoked_key_denied", rev_call.get("error", {}).get("code") == -32001)
+
+        # BATCH bypass must be closed: a batched pro call (no key) is denied.
+        batch_denied = _call_batch(client, ["get_freemium_preview", "get_pool_features"])
+        check(
+            "enforce_batch_pro_denied",
+            isinstance(batch_denied, dict)
+            and batch_denied.get("error", {}).get("data", {}).get("code")
+            == "subscription_required",
+        )
+        # A batch of only-anon tools passes through (stub returns a per-id list).
+        batch_ok = _call_batch(client, ["get_freemium_preview", "get_daily_report"])
+        check(
+            "enforce_batch_all_anon_passes",
+            isinstance(batch_ok, list) and all("result" in r for r in batch_ok),
+        )
         # non-tool methods always pass (discovery must work for anon)
         r = client.post("/rpc", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         check("enforce_tools_list_passes", r.json().get("result") is not None)

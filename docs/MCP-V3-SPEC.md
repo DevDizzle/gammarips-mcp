@@ -143,7 +143,7 @@ All read paths per invariant #3. All date params `YYYY-MM-DD`; all limits clampe
 ### 3.2 Enforcement
 - `AuthMiddleware` (ahead of the rate limiter, all transports incl. `/mcp`, `/sse`, `/rpc`): extract `Authorization: Bearer …` (accept `X-API-Key` alias) → SHA-256 → Firestore lookup with in-process TTL cache (300s positive / 60s negative) → attach `user_info = {uid, tier}` (or `tier: "anon"`).
 - Per-tool gating in `execute_tool` + a FastMCP wrapper via a single `TOOL_TIERS` map:
-  - **`anon` (free):** `get_freemium_preview`, `get_market_calendar_status`, `get_signal_explainer`, `get_available_dates`, `get_daily_report`, `get_report_list`, `list_playbooks`, `get_playbook("start-here")`.
+  - **`anon` (free):** `get_freemium_preview`, `get_market_calendar_status`, `get_signal_explainer`, `get_available_dates`, `get_daily_report`, `get_report_list`, `list_playbooks`, `get_playbook` (all playbooks — methodology is marketing).
   - **`pro` (paid key):** everything else — pool, features, surfaces, outcomes, replay, regime, full playbooks, receipts, `web_search`.
 - Denials return a structured, friendly error (`code: subscription_required`, docs + pricing URL) — an agent hitting the wall should be able to tell its human exactly how to upgrade.
 - `REQUIRE_API_KEY` staged rollout: `false` → **shadow mode** (`AUTH_SHADOW=true`: log would-be denials, block nothing) → `true`. Rollback = flip env var.

@@ -44,9 +44,20 @@ MODE_OFF = "off"
 MODE_SHADOW = "shadow"
 MODE_ENFORCE = "enforce"
 
-# TTL cache windows (seconds)
-_POSITIVE_TTL = 300.0
+# TTL cache windows (seconds). Positive kept short so a Stripe lapse / abuse
+# revocation propagates quickly (worst-case stale-pro window).
+_POSITIVE_TTL = 120.0
 _NEGATIVE_TTL = 60.0
+
+# Hard cap on the identity cache so bogus-key spraying can't grow it without
+# bound; oldest-inserted entries are dropped past the cap, plus a periodic
+# expired-entry sweep.
+_MAX_CACHE = 10_000
+_SWEEP_EVERY = 2_000
+
+# Only these tiers are privileged. A doc with a missing/unknown tier resolves
+# to non-privileged — never infer pro from an absent field (fail-closed).
+PRIVILEGED_TIERS = frozenset({"pro"})
 
 
 def get_auth_mode() -> str:
@@ -152,6 +163,7 @@ def _lookup_key(key_hash: str) -> dict | None:
 
 _cache: dict[str, tuple[Identity, float]] = {}
 _cache_lock = Lock()
+_cache_puts = 0
 
 
 def _cache_get(key_hash: str) -> Identity | None:
@@ -164,9 +176,23 @@ def _cache_get(key_hash: str) -> Identity | None:
     return None
 
 
+def _sweep_locked() -> None:
+    now = time.monotonic()
+    for k in [k for k, (_, exp) in _cache.items() if exp <= now]:
+        _cache.pop(k, None)
+    # Hard cap backstop: if still over, drop arbitrary entries (they just
+    # re-resolve on next use — no correctness impact).
+    while len(_cache) > _MAX_CACHE:
+        _cache.pop(next(iter(_cache)), None)
+
+
 def _cache_put(key_hash: str, identity: Identity, ttl: float) -> None:
+    global _cache_puts
     with _cache_lock:
         _cache[key_hash] = (identity, time.monotonic() + ttl)
+        _cache_puts += 1
+        if _cache_puts % _SWEEP_EVERY == 0 or len(_cache) > _MAX_CACHE:
+            _sweep_locked()
 
 
 def _anon(reason: str, key_prefix: str | None = None) -> Identity:
@@ -207,11 +233,16 @@ def resolve_identity(headers) -> Identity:
         _cache_put(key_hash, identity, _NEGATIVE_TTL)
         return identity
 
+    # Fail-closed on privilege: only an EXPLICIT privileged tier grants pro.
+    # A missing/unknown tier on an otherwise-active doc resolves to anon so a
+    # webapp write bug can never hand out free upgrades.
+    raw_tier = str(doc.get("tier", "")).strip().lower()
+    tier = raw_tier if raw_tier in PRIVILEGED_TIERS else "anon"
     identity = Identity(
-        tier=str(doc.get("tier", "pro")).lower() or "pro",
+        tier=tier,
         uid=doc.get("uid"),
         key_prefix=prefix,
-        reason="ok",
+        reason="ok" if tier != "anon" else "tier_not_privileged",
     )
     _cache_put(key_hash, identity, _POSITIVE_TTL)
     return identity
@@ -270,56 +301,67 @@ def denied_error(tool: str) -> dict:
 # --- middleware ------------------------------------------------------------
 
 
-async def _peek_tool_call(request: Request) -> tuple[str | None, object]:
-    """If the request body is a single JSON-RPC `tools/call`, return
-    (tool_name, id); otherwise (None, id?). Body is cached back onto the request
-    so downstream handlers can re-read it."""
+async def _extract_tool_calls(request: Request) -> list[tuple[str, object]]:
+    """Return every JSON-RPC `tools/call` in the body as (tool_name, id).
+    Handles BOTH a single object and a batch (array) — a batched pro call must
+    not slip past the gate. Body is cached back onto the request so downstream
+    handlers can re-read it. Returns [] for non-tool / unparseable bodies."""
     try:
         body = await request.body()
         request._body = body  # noqa: SLF001 — re-attach for downstream readers
         if not body:
-            return None, None
+            return []
         payload = json.loads(body)
     except Exception:  # noqa: BLE001
-        return None, None
-    # Batch requests (list) are not gated here — rare for tool calls; they fall
-    # through to normal handling. Documented limitation.
-    if isinstance(payload, dict) and payload.get("method") == "tools/call":
-        params = payload.get("params") or {}
-        return params.get("name"), payload.get("id")
-    return None, None
+        return []
+    items = payload if isinstance(payload, list) else [payload]
+    calls: list[tuple[str, object]] = []
+    for it in items:
+        if isinstance(it, dict) and it.get("method") == "tools/call":
+            name = (it.get("params") or {}).get("name")
+            if name:
+                calls.append((name, it.get("id")))
+    return calls
 
 
 class AccessGateMiddleware(BaseHTTPMiddleware):
-    """Resolves identity, gates `tools/call` by tier, and meters every tool
-    call. Runs on all transports (`/mcp`, `/sse` + `/messages`, `/rpc`,
-    `/jsonrpc`) because it inspects the JSON-RPC body, not the transport."""
+    """Resolves identity, gates every `tools/call` (single OR batched) by tier,
+    and meters each. Runs on all transports (`/mcp`, `/sse` + `/messages`,
+    `/rpc`, `/jsonrpc`) because it inspects the JSON-RPC body, not the
+    transport. Identity is resolved ONLY when a tool call is present, so
+    discovery/SSE-poll traffic never triggers a Firestore lookup."""
 
     async def dispatch(self, request: Request, call_next):
         mode = get_auth_mode()
         if mode == MODE_OFF:
             return await call_next(request)
 
-        tool, req_id = await _peek_tool_call(request)
+        calls = await _extract_tool_calls(request)
+        if not calls:
+            return await call_next(request)
+
         identity = resolve_identity(request.headers)
         request.state.identity = identity  # available downstream / to loggers
 
-        if tool is None:
-            return await call_next(request)
+        denied_tool: str | None = None
+        denied_id: object = None
+        for name, call_id in calls:
+            allowed = tool_allowed(name, identity.tier)
+            if allowed:
+                decision = "allowed"
+            elif mode == MODE_SHADOW:
+                decision = "shadow_would_deny"
+            else:
+                decision = "denied"
+            meter(identity, name, decision, mode)
+            if not allowed and denied_tool is None:
+                denied_tool, denied_id = name, call_id
 
-        allowed = tool_allowed(tool, identity.tier)
-        if allowed:
-            decision = "allowed"
-        elif mode == MODE_SHADOW:
-            decision = "shadow_would_deny"
-        else:
-            decision = "denied"
-        meter(identity, tool, decision, mode)
-
-        if not allowed and mode == MODE_ENFORCE:
+        if denied_tool is not None and mode == MODE_ENFORCE:
+            # Single call: echo its id. Batch: id of the first denied element.
             return JSONResponse(
                 status_code=200,
-                content={"jsonrpc": "2.0", "id": req_id, "error": denied_error(tool)},
+                content={"jsonrpc": "2.0", "id": denied_id, "error": denied_error(denied_tool)},
             )
 
         return await call_next(request)

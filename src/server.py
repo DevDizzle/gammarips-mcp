@@ -18,7 +18,13 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from utils.auth import AccessGateMiddleware, anon_tools, get_auth_mode
+from utils.auth import (
+    AccessGateMiddleware,
+    anon_tools,
+    denied_error,
+    get_auth_mode,
+    tool_allowed,
+)
 from utils.safety import RateLimitMiddleware, redact
 
 # Load environment variables
@@ -340,6 +346,24 @@ async def handle_jsonrpc(request: Request):
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
 
+        # Defense-in-depth: the AccessGateMiddleware already gated this request,
+        # but re-check here against the identity it resolved so a parser
+        # divergence between the body-sniff and this handler can't slip a pro
+        # tool through under enforce.
+        identity = getattr(request.state, "identity", None)
+        if (
+            identity is not None
+            and get_auth_mode() == "enforce"
+            and not tool_allowed(tool_name, identity.tier)
+        ):
+            return JSONResponse(
+                content={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": denied_error(tool_name),
+                }
+            )
+
         try:
             result = await execute_tool(tool_name, tool_args, None)
 
@@ -419,8 +443,16 @@ try:
         logger.warning("No explicit app method found, assuming mcp object is ASGI compatible")
         app = mcp
 
-    # Add middleware
+    # Add middleware. Execution order is outer->inner: CORS, RateLimit,
+    # AccessGate, RequestLogger (add order is LIFO — last added is outermost).
     app.add_middleware(RequestLogger)
+
+    # Phase 2 auth + tiering. Runs INSIDE the rate limiter so a bogus-key flood
+    # is 429'd before it can trigger a Firestore lookup / cache insert. Modes:
+    # off (passthrough) | shadow (log would-be denials, block nothing) |
+    # enforce (deny pro tools without a valid key). Env-gated by
+    # REQUIRE_API_KEY / AUTH_SHADOW so rollout + rollback are a flag flip.
+    app.add_middleware(AccessGateMiddleware)
 
     # Per-IP token-bucket rate limiter — defends the paid Google CSE tool
     # and BQ cost surface against unauthenticated abuse. Limits are
@@ -430,12 +462,6 @@ try:
         default_per_min=int(os.getenv("RATE_LIMIT_DEFAULT_PER_MIN", "60")),
         web_search_per_min=int(os.getenv("RATE_LIMIT_SEARCH_PER_MIN", "10")),
     )
-
-    # Phase 2 auth + tiering. Runs OUTSIDE the rate limiter (added after it),
-    # INSIDE CORS. Modes: off (passthrough) | shadow (log would-be denials,
-    # block nothing) | enforce (deny pro tools without a valid key). Env-gated
-    # by REQUIRE_API_KEY / AUTH_SHADOW so rollout + rollback are a flag flip.
-    app.add_middleware(AccessGateMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
