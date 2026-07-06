@@ -18,7 +18,7 @@ Every trading morning GammaRips scans the US options market for unusual institut
   blocked yet); flips to enforce once keys are issued. Get one at
   [gammarips.com/pricing](https://gammarips.com/pricing).
 
-## Available tools (24)
+## Available tools (25)
 
 ### Live pool
 
@@ -33,6 +33,7 @@ Every trading morning GammaRips scans the US options market for unusual institut
 - `get_opportunity_surface` — per-contract realized MFE/MAE excursions, exit-free (the core product surface)
 - `query_outcomes` — row-level bracket labels (same-day GIGO or 3-day) joined to features
 - `get_outcome_summary` — grouped aggregates (delta bucket, score, exit reason, ...) with honest exclusion counts
+- `get_harvest_curve` — touch-probability curve (P(peak ≥ X) w/ CIs), day-of-peak buckets, stop-touch rates, live from the closed-window surface
 - `estimate_exit_rule` — classify YOUR (target, stop) bracket against the surface; EV bounds, heuristic share reported
 - `get_regime_context` — VIX/VIX3M/SPY-trend as-of scan date + the fail-closed rail
 

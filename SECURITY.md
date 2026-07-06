@@ -77,6 +77,7 @@ parameters to a tight range *before* the query is built. Bounds:
 | `get_historical_performance` | hard 500 internal | 1–365 |
 | `web_search` | num_results 1–10 | query ≤ 500 chars |
 | `get_contract_snapshot` | n/a (single contract, strict OCC regex) | 30/min global bucket |
+| `get_harvest_curve` | targets ≤12 (5–300%), stops ≤6 (5–95%) | aggregates only; internal scan LIMIT 20000 |
 | `get_market_calendar_status` | n/a | 14-day forward window |
 | `get_signal_explainer` | n/a (single dict) | n/a |
 | `get_enriched_signal_schema` | classification metadata only | n/a |
@@ -235,7 +236,7 @@ We will reply within 48h on weekdays.
 
 | Date | Change |
 |---|---|
-| 2026-07-06 | **Eval wave 1+2.** TF-01/03 (bare `win_rate` keys deleted; universe in field names), TF-02 (`get_enriched_signals` summary default + strict `fields` projection + offset paging), TF-15 (`is_tradeable` dropped), TF-04/06/07/09/10/11/12/13/16 polish. **`get_contract_snapshot` added (RM-001a)** — reintroduces a single scoped Polygon snapshot call: bearer-header key, anchored OCC-regex input, 10s timeout, 30/min global bucket, no quote fields (RM-001b blocked on data plan). |
+| 2026-07-06 | **Eval wave 1+2.** TF-01/03 (bare `win_rate` keys deleted; universe in field names), TF-02 (`get_enriched_signals` summary default + strict `fields` projection + offset paging), TF-15 (`is_tradeable` dropped), TF-04/06/07/09/10/11/12/13/16 polish. **`get_contract_snapshot` added (RM-001a)** — reintroduces a single scoped Polygon snapshot call: bearer-header key, anchored OCC-regex input, 10s timeout, 30/min global bucket, no quote fields (RM-001b blocked on data plan). **`get_harvest_curve` added (RM-005)** — aggregate-only touch-probability curve from the closed-window opportunity surface; playbooks/explainer updated with the 2026-07-06 pre-registered study results (TF-17). |
 | 2026-07-02 | **Phase 2 auth.** Bearer keys (`gr_live_*` → Firestore `mcp_api_keys/{sha256}`, MCP reads only), anon/pro tool tiering, fail-closed-on-privilege resolution with TTL cache, staged shadow→enforce rollout (env-flagged), structured `subscription_required` denials, `MCP_TOOL_CALL` metering. Deployed in SHADOW. |
 | 2026-07-02 | **V3 surface.** Removed same-day pick tools (`get_todays_pick`, `list_todays_picks`, `get_open_position`). Live-pool tools moved to the leakage-safe `overnight_signals_enriched_safe` view (raw table leaked win-tracker forward-outcome columns on historical dates). Added substrate tools (`get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`) and playbooks. Schema tool now serves the column-classification data contract. Streamable HTTP `/mcp` primary transport. Polygon snapshot dependency removed (reintroduced 2026-07-06, scoped — see below). |
 | 2026-04-27 | Initial SECURITY.md. Sanitized errors, clamped limits, rate-limit middleware, schema whitelist. Added `get_market_calendar_status`, `get_signal_explainer`, `get_historical_performance`. Bot-isolation context (gammarips-bot agent, sandboxed) added by gammarips-engineer Claude session. |

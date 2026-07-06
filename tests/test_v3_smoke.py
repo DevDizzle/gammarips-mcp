@@ -142,6 +142,7 @@ def run_all() -> list[tuple[str, str]]:
     from tools.reports import get_daily_report, get_report_list
     from tools.substrate import (
         estimate_exit_rule,
+        get_harvest_curve,
         get_opportunity_surface,
         get_outcome_summary,
         get_pool_features,
@@ -346,6 +347,21 @@ def run_all() -> list[tuple[str, str]]:
     )
 
     # --- wave-2 additions (2026-07-06) -------------------------------------
+    def _verify_harvest(r):
+        ps = [t["p_touch"] for t in r["targets"]]
+        if ps != sorted(ps, reverse=True):
+            _fail("get_harvest_curve", f"p_touch not monotone in target: {ps}")
+        if not all(0.0 <= p <= 1.0 for p in ps):
+            _fail("get_harvest_curve", "p_touch out of [0,1]")
+        if "rows" in r:
+            _fail("get_harvest_curve", "row-level data leaked from an aggregate tool")
+        return f"(n={r['n']}, p20={r['targets'][1]['p_touch']}, aggregates only)"
+
+    check(
+        "get_harvest_curve",
+        lambda: get_harvest_curve(targets=[15, 20, 50, 100]),
+        _verify_harvest,
+    )
     check(
         "get_outcome_summary[moneyness]",
         lambda: get_outcome_summary(horizon="3d", group_by="moneyness_bucket"),

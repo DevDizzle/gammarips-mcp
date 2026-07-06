@@ -2,7 +2,45 @@
 
 The most important fact in this dataset: **the same pool of contracts is negative under a fixed exit and rich in favorable excursion before resolution.** Average same-day bracket outcome is negative; average max-favorable excursion (MFE) over 3 trading days is strongly positive. The gap between those two numbers *is* the product — and it's closed (or not) by exit discipline.
 
-## The three tools
+## What the surface actually says — measured, 2026-07-06
+
+Three pre-registered studies: two on every expired pool contract (N=2,146 and
+N=1,303; scans 2026-04-10 through 2026-06-30) and one on every closed 3-day
+excursion window (N=2,029; scans through 2026-06-26). Single Apr-Jun regime
+arc — these re-run as eras accrue. The
+numbers below include the unflattering ones on purpose; that is the point of
+a research subscription.
+
+1. **Delta is your base rate.** Realized ITM-at-expiration was 41.3% vs a mean
+   scan-time |delta| of 42.1% (N=2,146). The pool converts to ITM at the
+   market-implied rate — selection curates *which* fairly-priced contracts you
+   see; it does not find direction the market missed.
+2. **The path is fairly priced too.** Realized excursion peaks sit at the
+   ~51st percentile of each contract's own entry-IV-implied distribution
+   (N=1,303). The peaks are big (p90 peak ≈ +445% to expiry) — and exactly as
+   big as the IV charged.
+3. **The harvest curve** (3-trading-day window, touch-based ceiling, N=2,029):
+   P(touch +15%) = 55%, +20% = 51%, +50% = 31%, +100% = 14%; median peak +21%.
+   Serve it live, with your own filters, via `get_harvest_curve`.
+4. **The pops come late.** Given a peak ≥ +20%, it lands day 1 only ~15% of
+   the time and day 3 ~52%. "Take a quick profit hours after entry" is the
+   exception, not the pattern.
+5. **Fixed targets tested EV-negative at every level** (−7.2%/trade at +20%,
+   still −2.4% at +80%): the ~half that never pops loses ~35% by window end,
+   and a cheap target amputates the right tail that pays for it. EV improves
+   monotonically as the target rises. Also: a −30% drawdown is touched on
+   ~51% of all paths — size for it or your stop harvests you.
+6. **The giveback is the product.** Conditional on touching +50%, the median
+   contract retained only 31% of its peak at expiration; ~48% of all
+   ever-profitable contracts expired at a loss. The surface is real; holding
+   to expiry surrenders most of it. What closes that gap — or doesn't — is
+   your exit.
+
+Caveats that always apply: touches are bar-high events, not fills (no exit
+slippage in the surface); the ~28% illiquid/unlabeled tail is excluded and
+non-random; one regime arc so far.
+
+## The four tools
 
 **1. `get_opportunity_surface`** — the raw material.
 Per contract: `opp_peak_return` (MFE), `opp_trough_return` (MAE), minutes-to-each-extreme, over a 3-trading-day window from the 10:00 ET entry anchor, **no exit rule applied**. Fractions of entry premium (0.40 = +40%).
@@ -13,7 +51,12 @@ Two brackets are labeled with full engine mechanics (real fills, slippage, TIMEO
 - `3d`: +80% / −60%, 3-trading-day hold (legacy companion)
 These are your ground truth. Any exit idea should be sanity-checked against how these *exact* labels behave in the same slice.
 
-**3. `estimate_exit_rule`** — your bracket, classified against the surface.
+**3. `get_harvest_curve`** — the touch probabilities, live.
+For your target grid (and optional delta/date filters): P(peak ≥ X) with
+confidence intervals, which day the peak lands on, and stop-touch rates.
+Computed fresh from the substrate on every call, so it moves as data accrues.
+
+**4. `estimate_exit_rule`** — your bracket, classified against the surface.
 For an arbitrary (target, stop), each contract is classified TARGET / STOP / TIMEOUT from its extremes. Read the output critically:
 
 - **Definitive rows** (only one level crossed) are exact.

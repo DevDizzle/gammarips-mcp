@@ -63,6 +63,7 @@ from tools.playbooks import get_playbook, list_playbooks
 from tools.reports import get_daily_report, get_report_list
 from tools.substrate import (
     estimate_exit_rule,
+    get_harvest_curve,
     get_opportunity_surface,
     get_outcome_summary,
     get_pool_features,
@@ -71,7 +72,7 @@ from tools.substrate import (
 )
 from tools.web_search import web_search
 
-# Register tools with the MCP server (24 tools).
+# Register tools with the MCP server (25 tools).
 # NOTE: docstrings are the tool descriptions — keep them agent-facing.
 _ALL_TOOLS = {
     # live pool
@@ -87,6 +88,7 @@ _ALL_TOOLS = {
     "query_outcomes": query_outcomes,
     "get_outcome_summary": get_outcome_summary,
     "estimate_exit_rule": estimate_exit_rule,
+    "get_harvest_curve": get_harvest_curve,
     "get_regime_context": get_regime_context,
     # methodology
     "list_playbooks": list_playbooks,

@@ -26,13 +26,19 @@ that accept a bracket use human-friendly PERCENT units and say so.
 from __future__ import annotations
 
 import logging
+import math
+from datetime import timedelta as _timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from google.cloud import bigquery
 
 from utils.safety import MAX_RESPONSE_ROWS, clamp, safe_error
 
 logger = logging.getLogger(__name__)
+
+_ET_TZ = ZoneInfo("America/New_York")
+_ONE_DAY = _timedelta(days=1)
 
 try:
     client = bigquery.Client(project="profitscout-fida8")
@@ -904,3 +910,196 @@ def get_regime_context(scan_date: str | None = None) -> dict[str, Any]:
 
     except Exception as e:
         return {"error": safe_error(e, "get_regime_context")}
+
+
+def _wilson_ci(k: int, n: int, z: float = 1.96) -> list[float] | None:
+    if n == 0:
+        return None
+    p = k / n
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) * z / denom
+    return [round(center - half, 4), round(center + half, 4)]
+
+
+def _trading_day_bucket(entry_day, peak_dt_et) -> str:
+    """Which trading day of the window the peak landed on (day1/day2/day3).
+    Weekday arithmetic — market holidays inside a window can shift a bucket
+    by one day (documented in the tool's meta)."""
+    peak_date = peak_dt_et.date()
+    if peak_date <= entry_day:
+        return "day1"
+    d, idx = entry_day, 1
+    while d < peak_date and idx < 3:
+        d += _ONE_DAY
+        if d.weekday() < 5:
+            idx += 1
+    return f"day{idx}"
+
+
+def get_harvest_curve(
+    targets: list[float] | None = None,
+    stops: list[float] | None = None,
+    scan_date_from: str | None = None,
+    scan_date_to: str | None = None,
+    delta_min: float | None = None,
+    delta_max: float | None = None,
+) -> dict[str, Any]:
+    """
+    The HARVEST CURVE — for each profit target X, the probability a pool
+    contract's premium TOUCHED +X% at least once inside the 3-trading-day
+    excursion window (10:00 ET entry), with confidence intervals, which day
+    the peak landed on, and stop-touch rates. Computed live from the closed-
+    window opportunity surface, so it moves as data accrues.
+
+    This is the ceiling for any limit-at-+X% exit: a TOUCH IS NOT A FILL (bar-
+    high events, no exit slippage). Measured context (2026-07-06 study): about
+    half of contracts touch +20%, ~1 in 7 touches +100%, meaningful pops land
+    on day 2-3 not day 1, and every FIXED target tested EV-negative pool-wide
+    — use this curve to understand the surface, not as a strategy return.
+
+    Args:
+        targets: Profit targets in PERCENT (default [15,20,30,50,75,100]);
+            each clamped 5-300, max 12 values.
+        stops: Stop levels in PERCENT magnitude (default [30,60]); each
+            clamped 5-95, max 6 values.
+        scan_date_from / scan_date_to: YYYY-MM-DD range bounds (inclusive).
+        delta_min / delta_max: Bounds on |recommended_delta| (0-1).
+
+    Returns:
+        {window, n, median_peak_return, targets: [{target_pct, p_touch,
+         ci95, n_touch, day_of_peak: {day1,day2,day3}}], stops: [{stop_pct,
+         p_touch, ci95}], meta}
+    """
+    if not client:
+        return {"error": "BigQuery client not initialized"}
+
+    try:
+        tgts = sorted(
+            {max(5.0, min(300.0, abs(float(t)))) for t in (targets or [15, 20, 30, 50, 75, 100])}
+        )[:12]
+        stps = sorted({max(5.0, min(95.0, abs(float(s)))) for s in (stops or [30, 60])})[:6]
+
+        filters = ["o.opp_status = 'OK'", "o.opp_peak_return IS NOT NULL"]
+        params: list = []
+        if scan_date_from:
+            filters.append("f.scan_date >= @dfrom")
+            params.append(bigquery.ScalarQueryParameter("dfrom", "DATE", scan_date_from))
+        if scan_date_to:
+            filters.append("f.scan_date <= @dto")
+            params.append(bigquery.ScalarQueryParameter("dto", "DATE", scan_date_to))
+        if delta_min is not None:
+            filters.append("ABS(f.recommended_delta) >= @dmin")
+            params.append(bigquery.ScalarQueryParameter("dmin", "FLOAT64", float(delta_min)))
+        if delta_max is not None:
+            filters.append("ABS(f.recommended_delta) <= @dmax")
+            params.append(bigquery.ScalarQueryParameter("dmax", "FLOAT64", float(delta_max)))
+        where = " AND ".join(filters)
+
+        query = f"""
+            SELECT
+                o.opp_peak_return AS peak,
+                o.opp_trough_return AS trough,
+                o.opp_minutes_to_peak AS mins,
+                o.opp_entry_timestamp AS entry_ts,
+                o.entry_day AS entry_day
+            FROM {_FEATURES_VIEW} f
+            JOIN {_OUTCOMES_TABLE} o
+              USING (scan_date, ticker, recommended_contract)
+            WHERE {where}
+            LIMIT 20000
+        """
+        meta_query = f"""
+            SELECT
+                COUNT(*) AS pool_rows_in_window,
+                COUNTIF(NOT (o.opp_status = 'OK' AND o.opp_peak_return IS NOT NULL))
+                    AS excluded_no_surface
+            FROM {_FEATURES_VIEW} f
+            JOIN {_OUTCOMES_TABLE} o
+              USING (scan_date, ticker, recommended_contract)
+            WHERE {" AND ".join(filters[2:]) if len(filters) > 2 else "TRUE"}
+        """
+
+        rows = list(
+            client.query(
+                query, job_config=bigquery.QueryJobConfig(query_parameters=params)
+            ).result()
+        )
+        meta_row = next(
+            iter(
+                client.query(
+                    meta_query, job_config=bigquery.QueryJobConfig(query_parameters=params)
+                ).result()
+            ),
+            None,
+        )
+
+        n = len(rows)
+        truncated = n >= 20000
+        if n == 0:
+            return {
+                "n": 0,
+                "targets": [],
+                "stops": [],
+                "meta": {"note": "No closed-window rows matched the filters."},
+            }
+
+        peaks = sorted(float(r.peak) for r in rows)
+        median_peak = peaks[n // 2] if n % 2 else (peaks[n // 2 - 1] + peaks[n // 2]) / 2
+
+        # Pre-compute day-of-peak buckets once per row.
+        buckets: list[str] = []
+        for r in rows:
+            if r.entry_ts is not None and r.mins is not None and r.entry_day is not None:
+                peak_dt_et = (r.entry_ts + _timedelta(minutes=float(r.mins))).astimezone(_ET_TZ)
+                buckets.append(_trading_day_bucket(r.entry_day, peak_dt_et))
+            else:
+                buckets.append("unknown")
+
+        target_out = []
+        for t in tgts:
+            x = t / 100.0
+            hits = [i for i, r in enumerate(rows) if float(r.peak) >= x]
+            k = len(hits)
+            day_counts = {"day1": 0, "day2": 0, "day3": 0}
+            for i in hits:
+                if buckets[i] in day_counts:
+                    day_counts[buckets[i]] += 1
+            target_out.append(
+                {
+                    "target_pct": t,
+                    "p_touch": round(k / n, 4),
+                    "ci95": _wilson_ci(k, n),
+                    "n_touch": k,
+                    "day_of_peak": day_counts,
+                }
+            )
+
+        stop_out = []
+        for s in stps:
+            x = -s / 100.0
+            k = sum(1 for r in rows if r.trough is not None and float(r.trough) <= x)
+            stop_out.append({"stop_pct": -s, "p_touch": round(k / n, 4), "ci95": _wilson_ci(k, n)})
+
+        return {
+            "window": "3 trading days incl. entry day, 10:00 ET entry, 15:50 ET window end",
+            "n": n,
+            "truncated": truncated,
+            "median_peak_return": round(median_peak, 4),
+            "targets": target_out,
+            "stops": stop_out,
+            "meta": {
+                "pool_rows_in_window": meta_row.pool_rows_in_window if meta_row else None,
+                "excluded_no_surface": meta_row.excluded_no_surface if meta_row else None,
+                "note": (
+                    "TOUCH-BASED CEILING: bar-high events, no exit slippage — a "
+                    "touch is not a fill. day_of_peak is the day of the WINDOW "
+                    "MAXIMUM among touching rows (weekday arithmetic; a market "
+                    "holiday inside a window can shift a bucket by one day). The "
+                    "excluded illiquid/open tail is non-random. " + _COMPOSITE_DISCLAIMER
+                ),
+            },
+        }
+
+    except Exception as e:
+        return {"error": safe_error(e, "get_harvest_curve")}
