@@ -13,6 +13,7 @@ receipts remain available via get_position_history / get_historical_performance.
 """
 
 import logging
+import re
 from typing import Any
 
 from google.cloud import bigquery
@@ -29,6 +30,67 @@ except Exception as e:
 
 _SAFE_ENRICHED = "`profitscout-fida8.profit_scout.overnight_signals_enriched_safe`"
 _RAW_SCAN = "`profitscout-fida8.profit_scout.overnight_signals`"
+
+# TF-02: the safe view carries long narrative columns (thesis, news_summary,
+# flow_intent_reasoning, technicals) — full rows for the whole pool exceed the
+# tool-result cap (~160k chars for 50 rows). Default calls project this
+# decision-relevant scalar set instead; `fields` gives explicit projection and
+# `summary=False` restores full rows.
+_SUMMARY_COLUMNS = [
+    "scan_date",
+    "ticker",
+    "direction",
+    "overnight_score",
+    "key_headline",
+    "catalyst_type",
+    "recommended_contract",
+    "recommended_strike",
+    "recommended_expiration",
+    "recommended_dte",
+    "recommended_delta",
+    "recommended_mid_price",
+    "recommended_oi",
+    "recommended_volume",
+    "moneyness_pct",
+    "underlying_price",
+    "mom_60",
+    "risk_reward_ratio",
+    "atr_normalized_move",
+    "call_dollar_volume",
+    "put_dollar_volume",
+]
+
+# TF-15: `is_tradeable` is a legacy premium-flag combo from enrichment
+# ((hedge AND high_rr) OR (hedge AND high_atr)) whose name reads to an agent
+# like a liquidity/tradeability verdict — it is not one (it was false on an
+# entire live pool). Dropped from every response; the component flags
+# premium_hedge / premium_high_rr / premium_high_atr remain served.
+_DROP_FIELDS = {"is_tradeable"}
+
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # used with fullmatch only
+_MAX_FIELDS = 64
+_view_columns_cache: list[str] | None = None
+
+
+def _view_columns() -> list[str] | None:
+    """Column names of the safe view (cached). None if lookup fails —
+    callers then fall back to regex-only identifier validation and BigQuery
+    fails loudly on any unknown column."""
+    global _view_columns_cache
+    if _view_columns_cache is None and client:
+        try:
+            table = client.get_table(_SAFE_ENRICHED.strip("`"))
+            _view_columns_cache = [f.name for f in table.schema]
+        except Exception as e:  # pragma: no cover - network dependent
+            logger.warning(f"safe-view schema lookup failed: {e}")
+    return _view_columns_cache
+
+
+def _strip_dropped(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for r in rows:
+        for f in _DROP_FIELDS:
+            r.pop(f, None)
+    return rows
 
 
 def get_overnight_signals(
@@ -123,6 +185,9 @@ def get_enriched_signals(
     direction: str | None = None,
     ticker: str | None = None,
     limit: int = 25,
+    summary: bool = True,
+    fields: list[str] | None = None,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """
     The curated candidate pool for a scan date — AI-enriched signals with
@@ -135,15 +200,33 @@ def get_enriched_signals(
     candidate set and reason to its OWN contract (see
     get_playbook("run-your-own-tournament")).
 
+    Response size: by default (`summary=True`) rows carry ~21 decision-relevant
+    scalar columns, so the full pool fits in one response. Pass `fields=[...]`
+    to project exactly the columns you want (an invalid name is rejected with
+    the full `valid_fields` catalog in the error), or `summary=False` for
+    complete rows including the long narrative fields (thesis, news_summary)
+    — combine that with `ticker` or a small `limit`. Page with `offset` (rows
+    are ordered by overnight_score DESC, ticker).
+
     Served from a leakage-safe view: forward-outcome columns are physically
     stripped, so historical dates can be queried without seeing the future.
     Liquidity caveat: `recommended_oi`/`recommended_volume` are scan-time
     snapshots, not live values; `recommended_spread_pct` is permanently NULL.
+
+    Args:
+        scan_date: YYYY-MM-DD (default: latest scan).
+        direction: "bull"/"bear" prefix filter.
+        ticker: exact ticker filter.
+        limit: max rows (default 25, clamped 1-50).
+        summary: True (default) = compact decision columns; False = full rows.
+        fields: explicit column projection (overrides `summary`).
+        offset: pagination offset (clamped 0-500).
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
 
     limit = clamp(limit, 1, 50, default=25)
+    offset = clamp(offset, 0, 500, default=0)
 
     try:
         # Determine scan_date if not provided
@@ -158,10 +241,41 @@ def get_enriched_signals(
         if not scan_date:
             return [{"error": "No data found in the enriched signals view"}]
 
-        # SELECT * is safe here BECAUSE this is the guarded view — the raw
-        # table would leak win-tracker forward-outcome columns.
+        # Column projection. Identifiers can't be query parameters, so they are
+        # regex-validated (identifier charset only) and checked against the
+        # view schema; the dropped-field list applies on every path.
+        if fields:
+            # Order-preserving dedupe + strict identifier fullmatch + size cap.
+            seen: set[str] = set()
+            requested: list[str] = []
+            for f in fields:
+                if isinstance(f, str) and _IDENT_RE.fullmatch(f) and f not in seen:
+                    seen.add(f)
+                    requested.append(f)
+            requested = requested[:_MAX_FIELDS]
+            valid = _view_columns()
+            unknown: list[str] = []
+            if valid is not None:
+                unknown = sorted(set(requested) - set(valid))
+                requested = [f for f in requested if f in valid]
+            requested = [f for f in requested if f not in _DROP_FIELDS]
+            if not requested:
+                err: dict[str, Any] = {
+                    "error": f"No valid fields requested; unknown: {unknown or fields}."
+                }
+                if valid is not None:
+                    err["valid_fields"] = sorted(set(valid) - _DROP_FIELDS)
+                return [err]
+            select_list = ", ".join(f"`{c}`" for c in requested)
+        elif summary:
+            select_list = ", ".join(f"`{c}`" for c in _SUMMARY_COLUMNS)
+        else:
+            # SELECT * is safe here BECAUSE this is the guarded view — the raw
+            # table would leak win-tracker forward-outcome columns.
+            select_list = "*"
+
         base_query = f"""
-            SELECT *
+            SELECT {select_list}
             FROM {_SAFE_ENRICHED}
             WHERE scan_date = @scan_date
         """
@@ -178,8 +292,10 @@ def get_enriched_signals(
             base_query += " AND ticker = @ticker"
             query_params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
 
-        base_query += " ORDER BY overnight_score DESC LIMIT @limit"
+        # Deterministic ordering (ticker tie-break) so offset paging is stable.
+        base_query += " ORDER BY overnight_score DESC, ticker LIMIT @limit OFFSET @offset"
         query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
+        query_params.append(bigquery.ScalarQueryParameter("offset", "INTEGER", offset))
 
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(base_query, job_config=job_config)
@@ -196,7 +312,7 @@ def get_enriched_signals(
                 elif hasattr(v, "strftime"):
                     r[k] = str(v)
 
-        return results
+        return _strip_dropped(results)
 
     except Exception as e:
         return [{"error": safe_error(e, "get_enriched_signals")}]
@@ -263,6 +379,9 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
                 result[k] = v.isoformat()
             elif hasattr(v, "strftime"):
                 result[k] = str(v)
+
+        for f in _DROP_FIELDS:
+            result.pop(f, None)
 
         return result
 

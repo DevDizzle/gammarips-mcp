@@ -191,6 +191,38 @@ def run_all() -> list[tuple[str, str]]:
 
     check("get_enriched_signals[historical]", _hist_enriched, _verify_enriched)
 
+    # full-row (summary=False) historical leak check — this is the SELECT *
+    # path where the original V2 leak lived; the summary default no longer
+    # exercises it, so it needs its own assertion (TF-02 review fix #3).
+    def _hist_enriched_full():
+        dates = [d["scan_date"] for d in get_available_dates() if "scan_date" in d]
+        old = [d for d in dates if d <= historical_date]
+        target = old[0] if old else None
+        return get_enriched_signals(scan_date=target, limit=3, summary=False)
+
+    def _verify_enriched_full(rows):
+        note = _verify_enriched(rows)
+        if "is_tradeable" in rows[0]:
+            _fail("get_enriched_signals[full]", "TF-15 regression: is_tradeable served")
+        return note.replace("no forward-outcome cols", "full rows, no leak, no is_tradeable")
+
+    check("get_enriched_signals[full,historical]", _hist_enriched_full, _verify_enriched_full)
+
+    # fields projection must reject forward-outcome columns (they are absent
+    # from the safe view; a request for one returns an error, never data).
+    def _fields_reject():
+        out = get_enriched_signals(limit=3, fields=["next_day_pct", "is_win", "outcome_tier"])
+        if not (out and isinstance(out[0], dict) and "error" in out[0]):
+            _fail("fields-reject", f"forward-outcome fields not rejected: {out[:1]}")
+        return out
+
+    check(
+        "get_enriched_signals[fields-reject]",
+        _fields_reject,
+        lambda r: "(forward-outcome fields rejected)",
+        expect_error=True,
+    )
+
     def _detail():
         rows = _ok(get_enriched_signals(limit=1), "detail-seed")
         return get_signal_detail(rows[0]["ticker"], rows[0]["scan_date"][:10])
