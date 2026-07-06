@@ -125,6 +125,7 @@ def run_all() -> list[tuple[str, str]]:
 
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
+    from tools.market_snapshot import get_contract_snapshot
     from tools.metadata import get_available_dates, get_enriched_signal_schema
     from tools.overnight_signals import (
         get_enriched_signals,
@@ -337,7 +338,77 @@ def run_all() -> list[tuple[str, str]]:
     check(
         "get_regime_context",
         get_regime_context,
-        lambda r: f"({r['scan_date']} vix={r['vix_at_scan']} rail={r['regime_rail_pass']})",
+        lambda r: (
+            f"({r['scan_date']} vix={r['vix_at_scan']} rail={r['regime_rail_pass']}, lag noted)"
+            if r.get("latest_available_scan_date")
+            else _fail("get_regime_context", "TF-07: latest_available_scan_date missing")
+        ),
+    )
+
+    # --- wave-2 additions (2026-07-06) -------------------------------------
+    check(
+        "get_outcome_summary[moneyness]",
+        lambda: get_outcome_summary(horizon="3d", group_by="moneyness_bucket"),
+        lambda r: (
+            f"({len(r['groups'])} moneyness buckets)"
+            if r.get("groups")
+            else _fail("get_outcome_summary", "moneyness_bucket returned no groups")
+        ),
+    )
+    check(
+        "query_outcomes[aggregate_only]",
+        lambda: query_outcomes(horizon="3d", aggregate_only=True),
+        lambda r: (
+            f"(agg n={r['aggregate'].get('n')}, no rows key={'rows' not in r})"
+            if r.get("aggregate") and "rows" not in r
+            else _fail("query_outcomes", "aggregate_only returned rows or no aggregate")
+        ),
+    )
+    check(
+        "get_pool_features[empty-date]",
+        lambda: get_pool_features(scan_date="2020-01-02"),
+        lambda r: (
+            "(0 rows + latest_labeled pointer)"
+            if r.get("row_count") == 0 and r.get("latest_labeled_scan_date")
+            else _fail("get_pool_features", "TF-06: empty date lacks latest_labeled pointer")
+        ),
+    )
+    check(
+        "get_signal_detail[not-in-pool]",
+        lambda: get_signal_detail("ZZZZZZ"),
+        lambda r: (
+            "(friendly not-in-pool error)"
+            if r.get("error") and r.get("note")
+            else _fail("get_signal_detail", "Q3: no friendly not-in-pool message")
+        ),
+        expect_error=True,
+    )
+
+    def _snapshot_check():
+        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
+        return get_contract_snapshot(rows[0]["recommended_contract"])
+
+    check(
+        "get_contract_snapshot",
+        _snapshot_check,
+        lambda r: (
+            _fail(
+                "get_contract_snapshot",
+                f"quote field leaked: {set(r) & {'bid', 'ask', 'spread_pct', 'mid'}}",
+            )
+            if set(r) & {"bid", "ask", "spread_pct", "mid"}
+            else f"(oi={r.get('open_interest')}, vol={r.get('day_volume')}, as_of={str(r.get('as_of'))[:16]})"
+        ),
+    )
+    check(
+        "get_contract_snapshot[bad-input]",
+        lambda: get_contract_snapshot("'; DROP TABLE--"),
+        lambda r: (
+            "(rejected malformed contract)"
+            if r.get("error")
+            else _fail("get_contract_snapshot", "malformed contract accepted!")
+        ),
+        expect_error=True,
     )
 
     # --- playbooks --------------------------------------------------------

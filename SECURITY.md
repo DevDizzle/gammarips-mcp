@@ -34,6 +34,11 @@ Every registered tool is a read-only operation against:
   `enriched_features_v1` / `overnight_signals_enriched_safe`)
 - Firestore collection `daily_reports/*`
 - Google Custom Search API (read-only, paid)
+- Polygon.io option-snapshot REST API (read-only; `get_contract_snapshot`
+  only — constant base URL, contract validated by an anchored fullmatch
+  OCC regex before URL placement, API key sent as a bearer HEADER never
+  in the URL, 10s timeout, no retries, process-wide 30/min throttle;
+  serves NO quote fields)
 - Local markdown playbooks vendored in the container (`content/playbooks/`)
 
 No tool has BigQuery `INSERT` / `UPDATE` / `DELETE` privileges. The Cloud Run
@@ -71,6 +76,7 @@ parameters to a tight range *before* the query is built. Bounds:
 | `get_report_list` | 1–30 | n/a |
 | `get_historical_performance` | hard 500 internal | 1–365 |
 | `web_search` | num_results 1–10 | query ≤ 500 chars |
+| `get_contract_snapshot` | n/a (single contract, strict OCC regex) | 30/min global bucket |
 | `get_market_calendar_status` | n/a | 14-day forward window |
 | `get_signal_explainer` | n/a (single dict) | n/a |
 | `get_enriched_signal_schema` | classification metadata only | n/a |
@@ -188,7 +194,7 @@ Bearer-token auth + tool tiering (`src/utils/auth.py`, `AccessGateMiddleware`):
   unknown, malformed, revoked, or unverifiable key resolves to `anon` (never
   pro), and a Firestore blip degrades to `anon` rather than 500-ing — a
   transient outage cannot grant privilege, and never caches a failure.
-  Positive lookups cache 300s, negatives 60s.
+  Positive lookups cache 120s, negatives 60s.
 - **Staged rollout (env, no code redeploy to flip):**
   `REQUIRE_API_KEY=true` → **enforce**; `AUTH_SHADOW=true` (with require false)
   → **shadow** (resolves + logs would-be denials, blocks nothing); neither →
@@ -229,6 +235,7 @@ We will reply within 48h on weekdays.
 
 | Date | Change |
 |---|---|
+| 2026-07-06 | **Eval wave 1+2.** TF-01/03 (bare `win_rate` keys deleted; universe in field names), TF-02 (`get_enriched_signals` summary default + strict `fields` projection + offset paging), TF-15 (`is_tradeable` dropped), TF-04/06/07/09/10/11/12/13/16 polish. **`get_contract_snapshot` added (RM-001a)** — reintroduces a single scoped Polygon snapshot call: bearer-header key, anchored OCC-regex input, 10s timeout, 30/min global bucket, no quote fields (RM-001b blocked on data plan). |
 | 2026-07-02 | **Phase 2 auth.** Bearer keys (`gr_live_*` → Firestore `mcp_api_keys/{sha256}`, MCP reads only), anon/pro tool tiering, fail-closed-on-privilege resolution with TTL cache, staged shadow→enforce rollout (env-flagged), structured `subscription_required` denials, `MCP_TOOL_CALL` metering. Deployed in SHADOW. |
-| 2026-07-02 | **V3 surface.** Removed same-day pick tools (`get_todays_pick`, `list_todays_picks`, `get_open_position`). Live-pool tools moved to the leakage-safe `overnight_signals_enriched_safe` view (raw table leaked win-tracker forward-outcome columns on historical dates). Added substrate tools (`get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`) and playbooks. Schema tool now serves the column-classification data contract. Streamable HTTP `/mcp` primary transport. Polygon snapshot dependency removed. |
+| 2026-07-02 | **V3 surface.** Removed same-day pick tools (`get_todays_pick`, `list_todays_picks`, `get_open_position`). Live-pool tools moved to the leakage-safe `overnight_signals_enriched_safe` view (raw table leaked win-tracker forward-outcome columns on historical dates). Added substrate tools (`get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`) and playbooks. Schema tool now serves the column-classification data contract. Streamable HTTP `/mcp` primary transport. Polygon snapshot dependency removed (reintroduced 2026-07-06, scoped — see below). |
 | 2026-04-27 | Initial SECURITY.md. Sanitized errors, clamped limits, rate-limit middleware, schema whitelist. Added `get_market_calendar_status`, `get_signal_explainer`, `get_historical_performance`. Bot-isolation context (gammarips-bot agent, sandboxed) added by gammarips-engineer Claude session. |

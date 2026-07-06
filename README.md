@@ -18,9 +18,11 @@ Every trading morning GammaRips scans the US options market for unusual institut
   blocked yet); flips to enforce once keys are issued. Get one at
   [gammarips.com/pricing](https://gammarips.com/pricing).
 
-## Available tools (23)
+## Available tools (24)
 
 ### Live pool
+
+- `get_contract_snapshot` — fresh entry-day OI / session volume / last trade / day range for one contract (no quote fields on this data plan)
 - `get_enriched_signals` — the curated daily candidate pool: enrichment narrative, technicals, catalyst, recommended contract, `mom_60` (leakage-safe view)
 - `get_signal_detail` — full enrichment for one ticker
 - `get_overnight_signals` — the raw pre-curation scan (wide net)

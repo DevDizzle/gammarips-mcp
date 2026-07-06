@@ -16,6 +16,7 @@ response. These helpers ensure that:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from collections import defaultdict
@@ -73,12 +74,25 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"https?://[a-z0-9-]+-\d+\.[a-z]+-[a-z]+\d+\.run\.app\S*", re.I), "<run-url>"),
     # Polygon API key in URL params (defensive — shouldn't surface but cheap to add)
     (re.compile(r"apiKey=[A-Za-z0-9_-]+", re.I), "apiKey=<redacted>"),
+    # Upstream market-data vendor URLs (cosmetic — key is header-borne, never in URL)
+    (re.compile(r"https?://api\.polygon\.io\S*", re.I), "<market-data-api>"),
 )
+
+
+# Env vars whose LITERAL VALUES must never appear in any caller-visible
+# string. Pattern-based redaction can't catch a bare token inside an arbitrary
+# exception message (2026-07-06 incident: a malformed-header ValueError echoed
+# the raw key), so the values themselves are scrubbed at redact time.
+_SENSITIVE_ENV_VARS = ("POLYGON_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CSE_ID")
 
 
 def redact(text: str) -> str:
     """Apply the infra-detail redaction patterns to any string surfaced to a
     caller (error messages, BQ column descriptions, etc.)."""
+    for var in _SENSITIVE_ENV_VARS:
+        val = (os.getenv(var) or "").strip()
+        if val and len(val) >= 8 and val in text:
+            text = text.replace(val, f"<{var.lower()}>")
     for pattern, replacement in _REDACT_PATTERNS:
         text = pattern.sub(replacement, text)
     return text

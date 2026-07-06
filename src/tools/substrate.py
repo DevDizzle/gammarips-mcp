@@ -145,6 +145,20 @@ def get_pool_features(
 
         job_config = bigquery.QueryJobConfig(query_parameters=params)
         rows = [_serialize(dict(r)) for r in client.query(query, job_config=job_config).result()]
+        if not rows:
+            latest = _latest_scan_date(_FEATURES_VIEW)
+            return {
+                "scan_date": scan_date,
+                "row_count": 0,
+                "rows": [],
+                "latest_labeled_scan_date": latest,
+                "note": (
+                    "No labeled feature rows for this scan_date/filter. The "
+                    "labeled substrate lags the live pool by ~1-2 trading days — "
+                    f"latest labeled scan_date is {latest}. For today's live pool "
+                    "use get_enriched_signals."
+                ),
+            }
         return {"scan_date": scan_date, "row_count": len(rows), "rows": rows}
 
     except Exception as e:
@@ -263,6 +277,7 @@ def query_outcomes(
     min_overnight_score: int | None = None,
     exit_reason: str | None = None,
     limit: int = 100,
+    aggregate_only: bool = False,
 ) -> dict[str, Any]:
     """
     Row-level REALIZED LABELS for the full candidate pool, joined to their
@@ -290,10 +305,14 @@ def query_outcomes(
         min_overnight_score: Floor on overnight_score (1-10).
         exit_reason: Filter (TARGET | STOP | TIMEOUT | ...) on the chosen horizon.
         limit: Max rows (default 100, clamped 1-200).
+        aggregate_only: True = skip row-level output and return summary stats
+            (n, win_rate, avg/median/p25/p75, avg MFE/MAE) over the filtered
+            set — rows are verbose; use this when you only need the shape.
 
     Returns:
         {horizon, row_count, rows: [...features + labels...],
          meta: {excluded_null_label, excluded_illiquid, pool_rows_in_window, note}}
+        or, with aggregate_only: {horizon, aggregate: {...}, meta: {...}}.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -335,6 +354,63 @@ def query_outcomes(
 
         where = " AND ".join(filters)
         illiq = "IFNULL(o.illiquid_exit, FALSE)" if horizon == "same_day" else "FALSE"
+
+        if aggregate_only:
+            agg_query = f"""
+                SELECT
+                    COUNT(*) AS n,
+                    ROUND(SAFE_DIVIDE(COUNTIF({label_col} > 0), COUNT(*)), 4) AS win_rate,
+                    ROUND(AVG({label_col}), 4) AS avg_return,
+                    ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(50)], 4) AS median_return,
+                    ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(25)], 4) AS p25_return,
+                    ROUND(APPROX_QUANTILES({label_col}, 100)[OFFSET(75)], 4) AS p75_return,
+                    ROUND(AVG(IF(o.opp_status = 'OK', o.opp_peak_return, NULL)), 4) AS avg_mfe,
+                    ROUND(AVG(IF(o.opp_status = 'OK', o.opp_trough_return, NULL)), 4) AS avg_mae
+                FROM {_FEATURES_VIEW} f
+                JOIN {_OUTCOMES_TABLE} o
+                  USING (scan_date, ticker, recommended_contract)
+                WHERE {where}
+                  AND {label_col} IS NOT NULL
+                  AND NOT {illiq}
+            """
+            agg_row = next(
+                iter(
+                    client.query(
+                        agg_query, job_config=bigquery.QueryJobConfig(query_parameters=params)
+                    ).result()
+                ),
+                None,
+            )
+            meta_row = next(
+                iter(
+                    client.query(
+                        f"""
+                        SELECT
+                            COUNT(*) AS pool_rows_in_window,
+                            COUNTIF({label_col} IS NULL) AS excluded_null_label,
+                            COUNTIF({label_col} IS NOT NULL AND {illiq}) AS excluded_illiquid
+                        FROM {_FEATURES_VIEW} f
+                        JOIN {_OUTCOMES_TABLE} o
+                          USING (scan_date, ticker, recommended_contract)
+                        WHERE {where}
+                        """,
+                        job_config=bigquery.QueryJobConfig(query_parameters=params),
+                    ).result()
+                ),
+                None,
+            )
+            return {
+                "horizon": horizon,
+                "aggregate": _serialize(dict(agg_row)) if agg_row else {},
+                "meta": {
+                    "pool_rows_in_window": meta_row.pool_rows_in_window if meta_row else None,
+                    "excluded_null_label": meta_row.excluded_null_label if meta_row else None,
+                    "excluded_illiquid": meta_row.excluded_illiquid if meta_row else None,
+                    "note": (
+                        "Aggregate over the filtered set; FRACTION units. " + _COMPOSITE_DISCLAIMER
+                    ),
+                },
+            }
 
         query = f"""
             SELECT
@@ -411,6 +487,16 @@ _GROUP_EXPRS = {
     "premium_score": "CAST(f.premium_score AS STRING)",
     "exit_reason": None,  # resolved per horizon below
     "day_of_week": "FORMAT_DATE('%A', f.entry_day)",
+    # moneyness_pct is a FRACTION (0.05 = 5% OTM; negative = ITM at scan) and a
+    # session-frozen scan-time snapshot.
+    "moneyness_bucket": (
+        "CASE WHEN f.moneyness_pct IS NULL THEN 'unknown' "
+        "WHEN f.moneyness_pct <= 0 THEN 'itm_at_scan' "
+        "WHEN f.moneyness_pct < 0.05 THEN 'otm_0_5pct' "
+        "WHEN f.moneyness_pct < 0.10 THEN 'otm_5_10pct' "
+        "WHEN f.moneyness_pct < 0.15 THEN 'otm_10_15pct' "
+        "ELSE 'otm_15pct_plus' END"
+    ),
 }
 
 
@@ -438,7 +524,7 @@ def get_outcome_summary(
     Args:
         horizon: "same_day" (live V7.1 GIGO bracket) or "3d" (legacy +80/-60).
         group_by: one of none | delta_bucket | overnight_score | premium_score
-            | exit_reason | day_of_week. Strict whitelist.
+            | exit_reason | day_of_week | moneyness_bucket. Strict whitelist.
         scan_date_from / scan_date_to: YYYY-MM-DD range bounds (inclusive).
 
     Returns:
@@ -540,9 +626,17 @@ def estimate_exit_rule(
     scan_date_to: str | None = None,
 ) -> dict[str, Any]:
     """
-    "Bring your exit, we score it" — classify every closed-window pool
-    contract against YOUR bracket (target/stop) using the realized opportunity
-    surface (MFE/MAE extremes over the 3-trading-day window).
+    RESEARCH-ONLY — "bring your exit, we score it": classify every
+    closed-window pool contract against YOUR bracket (target/stop) using the
+    realized opportunity surface (MFE/MAE extremes over the 3-trading-day
+    window).
+
+    This tool surfaces excursion EVIDENCE; it does not prescribe or validate
+    an exit — the exit is yours. Measured context (2026-07-06 pool study):
+    every fixed target <= +80% tested EV-NEGATIVE pool-wide, because cheap
+    targets amputate the right tail that pays for the ~half of contracts that
+    never pop. Read any single bracket's stats as a description of the
+    surface, never as a strategy.
 
     Classification per contract:
       * TARGET      — peak reached your target and the trough never breached
@@ -620,7 +714,7 @@ def estimate_exit_rule(
             q = f"""
                 SELECT
                     COUNT(*) AS n,
-                    ROUND(COUNTIF({lc} > 0) / COUNT(*), 4) AS win_rate,
+                    ROUND(SAFE_DIVIDE(COUNTIF({lc} > 0), COUNT(*)), 4) AS win_rate,
                     ROUND(AVG({lc}), 4) AS avg_return,
                     ROUND(APPROX_QUANTILES({lc}, 100)[OFFSET(50)], 4) AS median_return
                 FROM {_OUTCOMES_TABLE}
@@ -726,7 +820,13 @@ def estimate_exit_rule(
                         "first-crossing — check heuristic_share."
                     ),
                 },
-                "meta": {"disclaimer": _COMPOSITE_DISCLAIMER},
+                "meta": {
+                    "research_only": (
+                        "Excursion evidence, not exit advice — no fixed bracket "
+                        "tested EV-positive pool-wide (2026-07-06 study)."
+                    ),
+                    "disclaimer": _COMPOSITE_DISCLAIMER,
+                },
             }
         )
         return result
@@ -787,6 +887,14 @@ def get_regime_context(scan_date: str | None = None) -> dict[str, Any]:
         r = dict(row)
         vix, vix3m = r.get("vix_at_scan"), r.get("vix3m_at_enrich")
         r["regime_rail_pass"] = (vix <= vix3m) if (vix is not None and vix3m is not None) else None
+        latest = _latest_scan_date(_OUTCOMES_TABLE, "vix_at_scan IS NOT NULL")
+        r["latest_available_scan_date"] = latest
+        r["lag_note"] = (
+            "Regime is computed per scan_date on the LABELED substrate, which "
+            f"lags the live pool by ~1-2 trading days (latest available: {latest}). "
+            "For a decision today, treat this as the most recent CLOSED session's "
+            "regime unless the dates match."
+        )
         r["rail_definition"] = (
             "PASS when VIX <= VIX3M (contango). FAIL (engine fail-closes, no "
             "trade) when spot VIX exceeds 3-month VIX (backwardation). Values "

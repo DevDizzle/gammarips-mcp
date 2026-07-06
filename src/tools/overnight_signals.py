@@ -202,11 +202,11 @@ def get_enriched_signals(
 
     Response size: by default (`summary=True`) rows carry ~21 decision-relevant
     scalar columns, so the full pool fits in one response. Pass `fields=[...]`
-    to project exactly the columns you want (an invalid name is rejected with
-    the full `valid_fields` catalog in the error), or `summary=False` for
-    complete rows including the long narrative fields (thesis, news_summary)
-    — combine that with `ticker` or a small `limit`. Page with `offset` (rows
-    are ordered by overnight_score DESC, ticker).
+    to project exactly the columns you want (STRICT: any unknown/malformed
+    name rejects the call and returns the full `valid_fields` catalog), or
+    `summary=False` for complete rows including the long narrative fields
+    (thesis, news_summary) — combine that with `ticker` or a small `limit`.
+    Page with `offset` (rows are ordered by overnight_score DESC, ticker).
 
     Served from a leakage-safe view: forward-outcome columns are physically
     stripped, so historical dates can be queried without seeing the future.
@@ -245,23 +245,32 @@ def get_enriched_signals(
         # regex-validated (identifier charset only) and checked against the
         # view schema; the dropped-field list applies on every path.
         if fields:
-            # Order-preserving dedupe + strict identifier fullmatch + size cap.
+            # STRICT projection (TF-16): any malformed, unknown, or removed
+            # field rejects the whole call — a typo must never silently become
+            # a missing column. Order-preserving dedupe + size cap.
             seen: set[str] = set()
             requested: list[str] = []
+            rejected: list[str] = []
             for f in fields:
-                if isinstance(f, str) and _IDENT_RE.fullmatch(f) and f not in seen:
-                    seen.add(f)
-                    requested.append(f)
+                if isinstance(f, str) and _IDENT_RE.fullmatch(f) and f not in _DROP_FIELDS:
+                    if f not in seen:
+                        seen.add(f)
+                        requested.append(f)
+                else:
+                    rejected.append(str(f)[:80])
             requested = requested[:_MAX_FIELDS]
             valid = _view_columns()
-            unknown: list[str] = []
             if valid is not None:
-                unknown = sorted(set(requested) - set(valid))
-                requested = [f for f in requested if f in valid]
-            requested = [f for f in requested if f not in _DROP_FIELDS]
-            if not requested:
+                known = set(valid)
+                rejected += [f for f in requested if f not in known]
+                requested = [f for f in requested if f in known]
+            if rejected or not requested:
                 err: dict[str, Any] = {
-                    "error": f"No valid fields requested; unknown: {unknown or fields}."
+                    "error": (
+                        f"Rejected field(s): {sorted(set(rejected)) or list(fields)} — "
+                        "no query run (strict: unknown names reject the call so a "
+                        "typo can't silently become a missing column)."
+                    )
                 }
                 if valid is not None:
                     err["valid_fields"] = sorted(set(valid) - _DROP_FIELDS)
@@ -318,11 +327,41 @@ def get_enriched_signals(
         return [{"error": safe_error(e, "get_enriched_signals")}]
 
 
-def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, Any]:
+def _ticker_pool_dates(ticker: str, limit: int = 10) -> list[str]:
+    """Recent scan_dates on which a ticker appears in the enriched pool."""
+    q = f"""
+        SELECT CAST(scan_date AS STRING) AS d
+        FROM {_SAFE_ENRICHED}
+        WHERE ticker = @ticker
+        ORDER BY scan_date DESC
+        LIMIT {int(limit)}
     """
-    Deep dive on a single ticker's enriched signal — full narrative enrichment
-    (news summary, thesis, technicals, catalyst) plus the recommended contract
-    and point-in-time features. Served from the leakage-safe enriched view.
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("ticker", "STRING", ticker)]
+    )
+    return [r.d for r in client.query(q, job_config=job_config).result()]
+
+
+_NOT_IN_POOL_NOTE = (
+    "The curated pool is ~50 names/day — most tickers on most days are simply "
+    "not in it (that's the anti-firehose design; there is no arbitrary-ticker "
+    "analysis path). Use get_overnight_signals for the raw pre-curation scan."
+)
+
+
+def get_signal_detail(
+    ticker: str, scan_date: str | None = None, full: bool = False
+) -> dict[str, Any]:
+    """
+    Deep dive on a single ticker's enriched signal — thesis, catalyst, the
+    recommended contract, and point-in-time features. Served from the
+    leakage-safe enriched view.
+
+    By default the extra-long narrative fields (news_summary,
+    flow_intent_reasoning) are omitted to keep the response tight — the thesis
+    and all decision fields are always included. Pass `full=true` for
+    everything. If the ticker is not in the pool for the requested date, the
+    error lists the recent dates on which it DOES appear.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -330,23 +369,13 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
     try:
         # Determine scan_date if not provided
         if not scan_date:
-            # First try to find the latest date for this specific ticker
-            query = f"""
-                SELECT MAX(scan_date) as max_date
-                FROM {_SAFE_ENRICHED}
-                WHERE ticker = @ticker
-            """
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[bigquery.ScalarQueryParameter("ticker", "STRING", ticker)]
-            )
-            query_job = client.query(query, job_config=job_config)
-            results = query_job.result()
-            for row in results:
-                scan_date = str(row.max_date) if row.max_date else None
-                break
-
-        if not scan_date:
-            return {"error": f"No signal found for ticker {ticker}"}
+            dates = _ticker_pool_dates(ticker, limit=10)
+            if not dates:
+                return {
+                    "error": f"{ticker} does not appear in the enriched pool.",
+                    "note": _NOT_IN_POOL_NOTE,
+                }
+            scan_date = dates[0]
 
         # Build query
         query = f"""
@@ -369,7 +398,17 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
             results.append(dict(row))
 
         if not results:
-            return {"error": f"Signal not found for {ticker} on {scan_date}"}
+            dates = _ticker_pool_dates(ticker, limit=10)
+            if dates:
+                return {
+                    "error": f"{ticker} is not in the pool for scan_date {scan_date}.",
+                    "ticker_appears_on": dates,
+                    "note": _NOT_IN_POOL_NOTE + " Pass one of the listed scan_dates.",
+                }
+            return {
+                "error": f"{ticker} does not appear in the enriched pool.",
+                "note": _NOT_IN_POOL_NOTE,
+            }
 
         result = results[0]
 
@@ -382,6 +421,15 @@ def get_signal_detail(ticker: str, scan_date: str | None = None) -> dict[str, An
 
         for f in _DROP_FIELDS:
             result.pop(f, None)
+
+        # TF-10: trim the extra-long narrative by default; thesis stays.
+        if not full:
+            omitted = [k for k in ("news_summary", "flow_intent_reasoning") if k in result]
+            for k in omitted:
+                result.pop(k)
+            if omitted:
+                result["omitted_fields"] = omitted
+                result["omitted_note"] = "Long narrative omitted by default — pass full=true."
 
         return result
 

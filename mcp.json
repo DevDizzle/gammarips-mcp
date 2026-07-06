@@ -15,6 +15,7 @@
     "get_enriched_signals",
     "get_signal_detail",
     "get_freemium_preview",
+    "get_contract_snapshot",
     "get_pool_features",
     "get_opportunity_surface",
     "query_outcomes",

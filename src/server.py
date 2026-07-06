@@ -46,6 +46,7 @@ mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080
 # Import tools
 from tools.education import get_market_calendar_status, get_signal_explainer
 from tools.historical import get_historical_performance
+from tools.market_snapshot import get_contract_snapshot
 from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.overnight_signals import (
     get_enriched_signals,
@@ -70,7 +71,7 @@ from tools.substrate import (
 )
 from tools.web_search import web_search
 
-# Register tools with the MCP server (23 tools).
+# Register tools with the MCP server (24 tools).
 # NOTE: docstrings are the tool descriptions — keep them agent-facing.
 _ALL_TOOLS = {
     # live pool
@@ -78,6 +79,8 @@ _ALL_TOOLS = {
     "get_enriched_signals": get_enriched_signals,
     "get_signal_detail": get_signal_detail,
     "get_freemium_preview": get_freemium_preview,
+    # live market data (RM-001a — entry-day freshness; no quote fields)
+    "get_contract_snapshot": get_contract_snapshot,
     # research substrate
     "get_pool_features": get_pool_features,
     "get_opportunity_surface": get_opportunity_surface,
@@ -136,7 +139,7 @@ def analyze_candidate(ticker: str) -> str:
     """Deep-dive one pool candidate: enrichment, features, history, excursions."""
     return (
         f"Deep-dive the GammaRips candidate {ticker}. Steps: "
-        f"1) get_signal_detail(ticker='{ticker}') for the full enrichment. "
+        f"1) get_signal_detail(ticker='{ticker}', full=true) for the full enrichment. "
         f"2) get_opportunity_surface(ticker='{ticker}', days=60) for its "
         "recent excursion history. "
         f"3) query_outcomes(ticker='{ticker}', horizon='3d') for realized "
