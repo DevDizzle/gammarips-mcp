@@ -77,6 +77,7 @@ def _budget_consume(n: int = 1) -> bool:
         _budget_state["spent"] += n
         return True
 
+
 # Earnings dates move on a quarterly cadence — a short in-process TTL cache
 # keeps repeat shortlist checks from spending provider quota.
 _CACHE_TTL_S = int(os.getenv("EARNINGS_CACHE_TTL_S", str(6 * 3600)))
@@ -127,7 +128,9 @@ def _fetch_next_earnings(ticker: str, api_key: str) -> dict[str, Any]:
     # body. That must NOT read as "no earnings scheduled" — fail closed.
     if not isinstance(rows, list):
         logger.error(f"FMP non-list payload for {ticker}: {str(rows)[:200]}")
-        return {"error": "earnings provider returned an error payload (quota/auth) — unknown, treat as in-window"}
+        return {
+            "error": "earnings provider returned an error payload (quota/auth) — unknown, treat as in-window"
+        }
 
     today = datetime.now(_ET).date().isoformat()
     future = sorted(
@@ -338,8 +341,7 @@ def get_earnings_window(
             out["note"] = (
                 "No upcoming earnings date in the provider's forward window "
                 f"(last reported {data.get('last_reported_date') or 'unknown'}). "
-                "This can mean 'not yet announced', NOT 'no earnings'. "
-                + _FAIL_CLOSED_NOTE
+                "This can mean 'not yet announced', NOT 'no earnings'. " + _FAIL_CLOSED_NOTE
             )
         return out
 
@@ -355,8 +357,7 @@ def get_earnings_window(
         out["note"] = (
             (
                 f"Earnings {next_date} falls ON/BEFORE expiration {exp} — the "
-                "doctrine hard exclusion applies to holds that reach the print. "
-                + _ESTIMATE_NOTE
+                "doctrine hard exclusion applies to holds that reach the print. " + _ESTIMATE_NOTE
             )
             if out["earnings_in_window"]
             else (
