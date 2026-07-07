@@ -68,8 +68,9 @@ def get_signal_performance(
         limit: Max results (default 50).
 
     Returns:
-        {universe, note, rows: [{ticker, direction, score, entry_price,
-         current_price, pnl_pct, outcome, scan_date}]}
+        {universe, basis, note, rows: [{ticker, direction, score, entry_price,
+         current_price, underlying_pct_change, underlying_direction_outcome,
+         scan_date}]} — field names carry the universe on purpose.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -117,12 +118,20 @@ def get_signal_performance(
         rows = []
         for row in query_job.result():
             r = dict(row)
-            # Add 'outcome' string field for compatibility
-            r["outcome"] = "WIN" if r.get("is_win") else "LOSS"
+            # TF-03: universe lives in the field names themselves — a row
+            # copied out of context still says "underlying", not "pnl".
+            is_win = r.pop("is_win", None)
+            r["underlying_pct_change"] = r.pop("pnl_pct", None)
+            # NULL is_win = tracking not yet resolved — never fabricate a LOSS.
+            if is_win is None:
+                r["underlying_direction_outcome"] = "UNRESOLVED"
+            else:
+                r["underlying_direction_outcome"] = "WIN" if is_win else "LOSS"
             rows.append(r)
 
         return {
             "universe": "underlying_direction",
+            "basis": "UNDERLYING-STOCK DIRECTION — NOT option PnL",
             "note": _UNDERLYING_UNIVERSE_NOTE,
             "row_count": len(rows),
             "rows": rows,
@@ -142,11 +151,16 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
     record. For those use `get_historical_performance` (realized option
     trades) or `get_outcome_summary` (full-pool option labels).
 
+    There is deliberately NO bare `win_rate` field in the response: the
+    headline is `underlying_direction_win_rate` (and bull_/bear_ variants),
+    so the number cannot be quoted without its universe.
+
     Args:
         days: Lookback period in days (default 30).
 
     Returns:
-        Summary statistics object with universe marker.
+        Summary statistics object with universe/basis markers;
+        underlying_direction_win_rate is the headline metric.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -203,32 +217,50 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
         job_config = bigquery.QueryJobConfig(query_parameters=query_params)
         query_job = client.query(query, job_config=job_config)
 
-        result = {}
+        raw = {}
         for row in query_job.result():
-            result = dict(row)
+            raw = dict(row)
             break
 
-        if not result:
+        if not raw:
             return {"message": "No performance data found for this period"}
 
-        # Calculate percentages
-        total = result.get("total_signals", 0)
-        if total > 0:
-            result["win_rate"] = round((result.get("wins", 0) / total) * 100, 2)
-        else:
-            result["win_rate"] = 0.0
+        # TF-01: the bare `win_rate`/`bull_win_rate`/`bear_win_rate` keys are
+        # deliberately GONE. A caller grabbing "win_rate" here read 81% while
+        # the option-PnL receipts said 33% — same word, different universe.
+        # The response is rebuilt explicitly so no ambiguous key can leak
+        # through from the query row.
+        total = raw.get("total_signals", 0) or 0
+        result: dict[str, Any] = {
+            "universe": "underlying_direction",
+            "basis": "UNDERLYING-STOCK DIRECTION — NOT option PnL",
+            "note": _UNDERLYING_UNIVERSE_NOTE,
+            "total_signals": total,
+            "wins": raw.get("wins", 0),
+            "underlying_direction_win_rate": (
+                round((raw.get("wins", 0) / total) * 100, 2) if total > 0 else 0.0
+            ),
+            "avg_underlying_return": raw.get("avg_return"),
+            "max_underlying_return": raw.get("max_return"),
+            "min_underlying_return": raw.get("min_return"),
+            "best_performer": raw.get("best_performer"),
+            "worst_performer": raw.get("worst_performer"),
+        }
 
-        bull_total = result.get("bull_total", 0)
+        bull_total = raw.get("bull_total", 0) or 0
+        result["bull_total"] = bull_total
         if bull_total > 0:
-            result["bull_win_rate"] = round((result.get("bull_wins", 0) / bull_total) * 100, 2)
+            result["bull_underlying_direction_win_rate"] = round(
+                (raw.get("bull_wins", 0) / bull_total) * 100, 2
+            )
 
-        bear_total = result.get("bear_total", 0)
+        bear_total = raw.get("bear_total", 0) or 0
+        result["bear_total"] = bear_total
         if bear_total > 0:
-            result["bear_win_rate"] = round((result.get("bear_wins", 0) / bear_total) * 100, 2)
+            result["bear_underlying_direction_win_rate"] = round(
+                (raw.get("bear_wins", 0) / bear_total) * 100, 2
+            )
 
-        result["universe"] = "underlying_direction"
-        result["underlying_direction_win_rate"] = result["win_rate"]
-        result["note"] = _UNDERLYING_UNIVERSE_NOTE
         return result
 
     except Exception as e:

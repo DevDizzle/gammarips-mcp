@@ -125,6 +125,7 @@ def run_all() -> list[tuple[str, str]]:
 
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
+    from tools.market_snapshot import get_contract_snapshot
     from tools.metadata import get_available_dates, get_enriched_signal_schema
     from tools.overnight_signals import (
         get_enriched_signals,
@@ -141,6 +142,7 @@ def run_all() -> list[tuple[str, str]]:
     from tools.reports import get_daily_report, get_report_list
     from tools.substrate import (
         estimate_exit_rule,
+        get_harvest_curve,
         get_opportunity_surface,
         get_outcome_summary,
         get_pool_features,
@@ -190,6 +192,38 @@ def run_all() -> list[tuple[str, str]]:
         return get_enriched_signals(scan_date=target, limit=3)
 
     check("get_enriched_signals[historical]", _hist_enriched, _verify_enriched)
+
+    # full-row (summary=False) historical leak check — this is the SELECT *
+    # path where the original V2 leak lived; the summary default no longer
+    # exercises it, so it needs its own assertion (TF-02 review fix #3).
+    def _hist_enriched_full():
+        dates = [d["scan_date"] for d in get_available_dates() if "scan_date" in d]
+        old = [d for d in dates if d <= historical_date]
+        target = old[0] if old else None
+        return get_enriched_signals(scan_date=target, limit=3, summary=False)
+
+    def _verify_enriched_full(rows):
+        note = _verify_enriched(rows)
+        if "is_tradeable" in rows[0]:
+            _fail("get_enriched_signals[full]", "TF-15 regression: is_tradeable served")
+        return note.replace("no forward-outcome cols", "full rows, no leak, no is_tradeable")
+
+    check("get_enriched_signals[full,historical]", _hist_enriched_full, _verify_enriched_full)
+
+    # fields projection must reject forward-outcome columns (they are absent
+    # from the safe view; a request for one returns an error, never data).
+    def _fields_reject():
+        out = get_enriched_signals(limit=3, fields=["next_day_pct", "is_win", "outcome_tier"])
+        if not (out and isinstance(out[0], dict) and "error" in out[0]):
+            _fail("fields-reject", f"forward-outcome fields not rejected: {out[:1]}")
+        return out
+
+    check(
+        "get_enriched_signals[fields-reject]",
+        _fields_reject,
+        lambda r: "(forward-outcome fields rejected)",
+        expect_error=True,
+    )
 
     def _detail():
         rows = _ok(get_enriched_signals(limit=1), "detail-seed")
@@ -305,7 +339,92 @@ def run_all() -> list[tuple[str, str]]:
     check(
         "get_regime_context",
         get_regime_context,
-        lambda r: f"({r['scan_date']} vix={r['vix_at_scan']} rail={r['regime_rail_pass']})",
+        lambda r: (
+            f"({r['scan_date']} vix={r['vix_at_scan']} rail={r['regime_rail_pass']}, lag noted)"
+            if r.get("latest_available_scan_date")
+            else _fail("get_regime_context", "TF-07: latest_available_scan_date missing")
+        ),
+    )
+
+    # --- wave-2 additions (2026-07-06) -------------------------------------
+    def _verify_harvest(r):
+        ps = [t["p_touch"] for t in r["targets"]]
+        if ps != sorted(ps, reverse=True):
+            _fail("get_harvest_curve", f"p_touch not monotone in target: {ps}")
+        if not all(0.0 <= p <= 1.0 for p in ps):
+            _fail("get_harvest_curve", "p_touch out of [0,1]")
+        if "rows" in r:
+            _fail("get_harvest_curve", "row-level data leaked from an aggregate tool")
+        return f"(n={r['n']}, p20={r['targets'][1]['p_touch']}, aggregates only)"
+
+    check(
+        "get_harvest_curve",
+        lambda: get_harvest_curve(targets=[15, 20, 50, 100]),
+        _verify_harvest,
+    )
+    check(
+        "get_outcome_summary[moneyness]",
+        lambda: get_outcome_summary(horizon="3d", group_by="moneyness_bucket"),
+        lambda r: (
+            f"({len(r['groups'])} moneyness buckets)"
+            if r.get("groups")
+            else _fail("get_outcome_summary", "moneyness_bucket returned no groups")
+        ),
+    )
+    check(
+        "query_outcomes[aggregate_only]",
+        lambda: query_outcomes(horizon="3d", aggregate_only=True),
+        lambda r: (
+            f"(agg n={r['aggregate'].get('n')}, no rows key={'rows' not in r})"
+            if r.get("aggregate") and "rows" not in r
+            else _fail("query_outcomes", "aggregate_only returned rows or no aggregate")
+        ),
+    )
+    check(
+        "get_pool_features[empty-date]",
+        lambda: get_pool_features(scan_date="2020-01-02"),
+        lambda r: (
+            "(0 rows + latest_labeled pointer)"
+            if r.get("row_count") == 0 and r.get("latest_labeled_scan_date")
+            else _fail("get_pool_features", "TF-06: empty date lacks latest_labeled pointer")
+        ),
+    )
+    check(
+        "get_signal_detail[not-in-pool]",
+        lambda: get_signal_detail("ZZZZZZ"),
+        lambda r: (
+            "(friendly not-in-pool error)"
+            if r.get("error") and r.get("note")
+            else _fail("get_signal_detail", "Q3: no friendly not-in-pool message")
+        ),
+        expect_error=True,
+    )
+
+    def _snapshot_check():
+        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
+        return get_contract_snapshot(rows[0]["recommended_contract"])
+
+    check(
+        "get_contract_snapshot",
+        _snapshot_check,
+        lambda r: (
+            _fail(
+                "get_contract_snapshot",
+                f"quote field leaked: {set(r) & {'bid', 'ask', 'spread_pct', 'mid'}}",
+            )
+            if set(r) & {"bid", "ask", "spread_pct", "mid"}
+            else f"(oi={r.get('open_interest')}, vol={r.get('day_volume')}, as_of={str(r.get('as_of'))[:16]})"
+        ),
+    )
+    check(
+        "get_contract_snapshot[bad-input]",
+        lambda: get_contract_snapshot("'; DROP TABLE--"),
+        lambda r: (
+            "(rejected malformed contract)"
+            if r.get("error")
+            else _fail("get_contract_snapshot", "malformed contract accepted!")
+        ),
+        expect_error=True,
     )
 
     # --- playbooks --------------------------------------------------------

@@ -234,8 +234,11 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         ),
         "how_used": (
             "The core of the opportunity surface — profit POTENTIAL with the exit "
-            "left free. Realized post-entry: never use as a selection feature. "
-            "See get_opportunity_surface and get_playbook('exit-lab')."
+            "left free. Timing fact (measured Apr-Jun 2026): peaks >= +20% land "
+            "on day 1 only ~15% of the time; day 3 ~52% — plan exits for the back "
+            "of the window. Realized post-entry: never use as a selection "
+            "feature. See get_opportunity_surface, get_harvest_curve, and "
+            "get_playbook('exit-lab')."
         ),
     },
     "opp_trough_return": {
@@ -327,13 +330,61 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
         ),
         "how_used": (
             "A point-in-time feature but a STALE liquidity signal. Re-check live "
-            "liquidity with your own feed before sizing a real trade."
+            "liquidity with get_contract_snapshot (fresh OI / session volume / "
+            "last trade) before sizing a real trade."
         ),
     },
     "recommended_volume": {
         "label": "Contract Volume (scan-time snapshot)",
         "definition": "Cumulative session volume for the recommended contract, frozen at scan time.",
-        "how_used": "Same staleness caveat as recommended_oi — feature, not live liquidity.",
+        "how_used": (
+            "Same staleness caveat as recommended_oi — feature, not live "
+            "liquidity. get_contract_snapshot serves the fresh values."
+        ),
+    },
+    "recommended_delta": {
+        "label": "Contract Delta (scan-time)",
+        "definition": (
+            "The recommended contract's option delta as-of scan time. Delta is "
+            "also, approximately, the market-implied probability the contract "
+            "expires in the money."
+        ),
+        "how_used": (
+            "Treat |delta| as your honest BASE RATE: on 2,146 expired pool "
+            "contracts (Apr-Jun 2026) the realized ITM rate was 41.3% vs a mean "
+            "delta of 42.1% — the pool converts at the market-implied rate, so a "
+            "0.35-delta candidate is a ~1-in-3 proposition at expiry no matter "
+            "how good the narrative reads. Historically the mid band "
+            "(|delta| 0.20-0.46) was the strongest conditional lever on 3-day "
+            "labels."
+        ),
+    },
+    "harvest_curve": {
+        "label": "Harvest Curve (concept)",
+        "definition": (
+            "P(the option's premium touches +X% at least once within the "
+            "3-trading-day window from the 10:00 ET entry), for a grid of "
+            "targets X — the ceiling for any limit-at-+X% exit."
+        ),
+        "how_used": (
+            "Served live by get_harvest_curve. Measured on the Apr-Jun 2026 pool: "
+            "~half of contracts touch +20%, ~1 in 7 touches +100%, and the "
+            "meaningful pops land on day 2-3, not day 1. A touch is not a fill — "
+            "treat the curve as an upper bound."
+        ),
+    },
+    "giveback": {
+        "label": "Giveback (concept)",
+        "definition": (
+            "How much of a contract's peak gain evaporates by expiration if "
+            "nobody exits: peak return minus terminal return."
+        ),
+        "how_used": (
+            "The measured reason exit discipline matters: conditional on touching "
+            "+50%, the median pool contract retained only ~31% of its peak at "
+            "expiry, and ~48% of all ever-profitable contracts expired at a loss "
+            "(Apr-Jun 2026, N=1,303 expired; the 31% figure conditions on the N=571 subset that touched +50%). The surface is real; holding surrenders it."
+        ),
     },
 }
 

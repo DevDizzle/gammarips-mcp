@@ -2,6 +2,20 @@
 
 Dated record of changes that affect how you should interpret the data. Re-check this playbook periodically; it is the subscription's "what moved" feed.
 
+## 2026-07-06 — Research drop + tool wave (the living-research feed, working)
+**Three pre-registered studies (two on all expired pool contracts, Apr 10 - Jun 30 2026 scans; one on all closed 3-day excursion windows, scans through Jun 26):**
+- **Delta-calibrated:** realized ITM-at-expiry 41.3% vs mean scan-time |delta| 42.1% (N=2,146) — the pool converts at the market-implied rate; treat |delta| as your base rate.
+- **IV-calibrated path:** realized excursion peaks at the ~51st percentile of each contract's own entry-IV-implied distribution (N=1,303) — big peaks, exactly as priced.
+- **Harvest curve + timing + giveback (N=2,029):** P(touch +20% in the 3-day window) = 51%, +100% = 14%; peaks ≥ +20% land day 3 ~52% of the time (day 1 only ~15%); every fixed target ≤ +80% tested EV-negative pool-wide; conditional on touching +50%, the median contract kept only 31% of its peak at expiry and ~48% of ever-profitable contracts expired at a loss.
+Full context in `get_playbook("exit-lab")`. One regime arc so far — these re-run as eras accrue.
+
+**Tool changes (same day):**
+- NEW `get_contract_snapshot` — fresh entry-day OI / session volume / last trade / day range per contract (scan-frozen pool numbers finally have a live companion). No bid/ask/spread on the current data plan — deliberately absent, not NULL.
+- NEW `get_harvest_curve` — the touch-probability curve with CIs, day-of-peak buckets, and stop-touch rates, computed live with your filters.
+- `get_win_rate_summary` / `get_signal_performance`: the bare `win_rate` key is GONE — the headline is `underlying_direction_win_rate` (it was never option PnL; now the field name says so).
+- `get_enriched_signals`: compact summary default (full pool fits in one response), strict `fields` projection, `offset` paging. `is_tradeable` removed everywhere (it was a legacy premium-flag combo, not a liquidity verdict).
+- `estimate_exit_rule` labeled research-only; `get_signal_detail` trims long narrative by default (`full=true` restores) and now tells you when a ticker simply isn't in the pool; lag notes on `get_pool_features`/`get_regime_context`; `moneyness_bucket` grouping; `aggregate_only` mode on `query_outcomes`.
+
 ## 2026-07-02 — MCP V3 surface
 - New substrate tools: `get_pool_features`, `get_opportunity_surface`, `query_outcomes`, `get_outcome_summary`, `estimate_exit_rule`, `get_regime_context`, playbooks.
 - Same-day pick tools removed (`get_todays_pick`, `list_todays_picks`, `get_open_position`): the engine's own selection is no longer published same-day. Realized receipts remain via `get_position_history` / `get_historical_performance`.

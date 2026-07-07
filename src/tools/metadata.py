@@ -85,6 +85,10 @@ def get_available_dates() -> list[dict[str, Any]]:
 
 def get_enriched_signal_schema() -> dict[str, Any]:
     """
+    RESEARCH / POWER-USER tool. If you just need what a field MEANS,
+    `get_signal_explainer` is the everyday path — this is the formal contract
+    for grounding research code.
+
     The substrate DATA CONTRACT, machine-readable: every column of the
     outcome/label substrate with its leakage classification and as-of
     boundary, plus the exact column set exposed by the point-in-time features

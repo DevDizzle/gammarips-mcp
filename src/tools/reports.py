@@ -55,7 +55,9 @@ def get_daily_report(date: str | None = None) -> dict[str, Any]:
 
 def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
     """
-    List available reports.
+    List available reports, most recent first. Repeated titles across dates
+    are deduplicated (the generator occasionally reuses a headline) — each
+    title appears once, at its most recent scan_date.
 
     Args:
         limit: Number of reports to return (default 10).
@@ -70,18 +72,28 @@ def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
 
     try:
         reports_ref = db.collection("daily_reports")
-        query = reports_ref.order_by("scan_date", direction=firestore.Query.DESCENDING).limit(limit)
+        # Over-fetch, then dedupe titles keeping the most recent occurrence.
+        query = reports_ref.order_by("scan_date", direction=firestore.Query.DESCENDING).limit(
+            min(limit * 3, 90)
+        )
 
         results = []
+        seen_titles: set[str] = set()
         for doc in query.stream():
             data = doc.to_dict()
+            title = data.get("title")
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
             results.append(
                 {
                     "scan_date": data.get("scan_date"),
-                    "title": data.get("title"),
+                    "title": title,
                     "created_at": data.get("created_at"),
                 }
             )
+            if len(results) >= limit:
+                break
 
         return results
 

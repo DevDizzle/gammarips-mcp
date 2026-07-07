@@ -32,11 +32,20 @@ get_outcome_summary(horizon="3d", group_by="delta_bucket")
 get_opportunity_surface(days=30)  → recent excursion structure of the pool
 ```
 
+**3.5 Refresh liquidity on your shortlist — the pool's numbers are stale by design.**
+```
+get_contract_snapshot(recommended_contract)
+                                  → fresh OI, session volume, last trade, day range
+```
+`recommended_oi`/`recommended_volume` are scan-frozen; the overnight sweep only
+becomes visible OI the next morning. This is the decision-time read. (No
+bid/ask/spread on the current data plan — the field is absent, not broken.)
+
 **4. Select — your agent's job, not ours.**
 Run your own ranking, or the bracket-tournament pattern (`get_playbook("run-your-own-tournament")`). Diversity of selection across subscribers is a feature: the primitives are shared, the conclusions are yours.
 
 **5. Decide the exit BEFORE entry.**
-Use `estimate_exit_rule(target_pct=..., stop_pct=...)` to see how your bracket would have resolved across the historical pool, and `get_playbook("exit-lab")` for the honest limits of that estimate. The single most robust finding in our research: outcomes are decided by exit discipline more than by selection.
+Use `get_harvest_curve(targets=[...])` for touch probabilities and peak timing, `estimate_exit_rule(target_pct=..., stop_pct=...)` to classify your bracket against the surface, and `get_playbook("exit-lab")` for the measured facts (fixed targets tested EV-negative pool-wide; pops land day 2-3; the giveback is large). The single most robust finding in our research: outcomes are decided by exit discipline more than by selection.
 
 **6. After the fact — check receipts, never same-day.**
 ```
@@ -46,6 +55,6 @@ get_historical_performance()      → cohort aggregate
 The engine's own daily selection is intentionally NOT published same-day. Realized rows appear after exit.
 
 ## Caveats that bite
-- `recommended_oi` / `recommended_volume` are **session-frozen snapshots** from scan time, not live values. Overnight sweeps typically become visible OI only the *next* morning. Re-check live liquidity before acting on size.
+- `recommended_oi` / `recommended_volume` are **session-frozen snapshots** from scan time, not live values. Overnight sweeps typically become visible OI only the *next* morning. Re-check with `get_contract_snapshot` before acting on size.
 - `recommended_spread_pct` is permanently NULL (no options NBBO on the current data plan). Check spreads with your own broker/data feed.
 - Earnings: the engine excludes names with earnings inside its hold window (IV crush is literature-settled). If you hold longer than same-day, re-check the earnings calendar for your horizon yourself.
