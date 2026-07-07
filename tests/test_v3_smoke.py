@@ -125,7 +125,7 @@ def run_all() -> list[tuple[str, str]]:
 
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
-    from tools.market_snapshot import get_contract_snapshot
+    from tools.market_snapshot import get_contract_snapshot, get_pool_liquidity
     from tools.metadata import get_available_dates, get_enriched_signal_schema
     from tools.overnight_signals import (
         get_enriched_signals,
@@ -423,6 +423,91 @@ def run_all() -> list[tuple[str, str]]:
             "(rejected malformed contract)"
             if r.get("error")
             else _fail("get_contract_snapshot", "malformed contract accepted!")
+        ),
+        expect_error=True,
+    )
+
+    # --- Priority-1 (2026-07-07): cache-first + live + batch + TF-18 ---------
+    _P1_PROVENANCE = {"pool_liquidity_cache", "pool_liquidity_cache_stale", "upstream_live"}
+
+    def _snapshot_p1_check():
+        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
+        return get_contract_snapshot(rows[0]["recommended_contract"])
+
+    check(
+        "get_contract_snapshot[provenance+TF-18]",
+        _snapshot_p1_check,
+        lambda r: (
+            f"(from={r.get('retrieved_from')}, und_px={r.get('underlying_price')} "
+            f"[{r.get('underlying_price_source')}])"
+            if r.get("retrieved_from") in _P1_PROVENANCE and r.get("underlying_price")
+            else _fail(
+                "get_contract_snapshot",
+                f"P1 regression: retrieved_from={r.get('retrieved_from')}, "
+                f"underlying_price={r.get('underlying_price')}",
+            )
+        ),
+    )
+
+    def _snapshot_live_check():
+        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
+        return get_contract_snapshot(rows[0]["recommended_contract"], live=True)
+
+    check(
+        "get_contract_snapshot[live=true]",
+        _snapshot_live_check,
+        lambda r: (
+            f"(upstream_live, as_of={str(r.get('as_of'))[:16]})"
+            if r.get("retrieved_from") == "upstream_live"
+            else _fail(
+                "get_contract_snapshot", f"live=true not upstream: {r.get('retrieved_from')}"
+            )
+        ),
+    )
+
+    def _pool_liquidity_verify(r):
+        if not r.get("rows"):
+            # legitimate off-hours/holiday emptiness only if honestly noted
+            return "(0 rows + note)" if r.get("note") else _fail("get_pool_liquidity", "empty without note")
+        leaked = [
+            row for row in r["rows"] if set(row) & {"bid", "ask", "spread_pct", "mid"}
+        ]
+        if leaked:
+            _fail("get_pool_liquidity", f"NULL quote fields leaked on {len(leaked)} rows")
+        missing_asof = [row for row in r["rows"] if not row.get("as_of")]
+        if missing_asof:
+            _fail("get_pool_liquidity", f"{len(missing_asof)} rows missing as_of provenance")
+        return f"({r['count']} rows, scan_date={r.get('scan_date')}, freshest={str(r.get('freshest_as_of'))[:16]})"
+
+    check("get_pool_liquidity", get_pool_liquidity, _pool_liquidity_verify)
+
+    def _pool_liquidity_shortlist():
+        pool = _ok(get_pool_liquidity(), "pool-liq-seed")
+        if not pool.get("rows"):
+            return {"skipped": True, "note": "no snapshots yet today"}
+        shortlist = [row["contract"] for row in pool["rows"][:3]]
+        return get_pool_liquidity(contracts=shortlist)
+
+    check(
+        "get_pool_liquidity[shortlist]",
+        _pool_liquidity_shortlist,
+        lambda r: (
+            "(skipped: no snapshots)"
+            if r.get("skipped")
+            else (
+                f"({r['count']} rows in one call)"
+                if 0 < r.get("count", 0) <= 3
+                else _fail("get_pool_liquidity", f"shortlist returned {r.get('count')}")
+            )
+        ),
+    )
+    check(
+        "get_pool_liquidity[bad-contract]",
+        lambda: get_pool_liquidity(contracts=["'; DROP TABLE--"]),
+        lambda r: (
+            "(rejected malformed contract)"
+            if r.get("error")
+            else _fail("get_pool_liquidity", "malformed contract accepted!")
         ),
         expect_error=True,
     )
