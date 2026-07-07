@@ -123,6 +123,7 @@ def _ok(result, name: str):
 def run_all() -> list[tuple[str, str]]:
     sys.path.insert(0, "src")
 
+    from tools.earnings import get_earnings_window
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
     from tools.market_snapshot import get_contract_snapshot, get_pool_liquidity
@@ -508,6 +509,37 @@ def run_all() -> list[tuple[str, str]]:
             "(rejected malformed contract)"
             if r.get("error")
             else _fail("get_pool_liquidity", "malformed contract accepted!")
+        ),
+        expect_error=True,
+    )
+
+    # --- RM-003 (2026-07-07): earnings window -------------------------------
+    def _earnings_check():
+        rows = _ok(get_enriched_signals(limit=1), "earnings-seed")
+        return get_earnings_window(contract=rows[0]["recommended_contract"])
+
+    def _verify_earnings(r):
+        if r.get("earnings_in_window") is None:
+            # unknown is legitimate ONLY with the explicit fail-closed guidance
+            blob = (str(r.get("note", "")) + str(r.get("error", ""))).lower()
+            if "in-window" not in blob:
+                _fail("get_earnings_window", "unknown date without fail-closed note")
+            return f"(unknown -> fail-closed noted, ticker={r.get('ticker')})"
+        if not r.get("expiration") or not r.get("next_earnings_date"):
+            _fail("get_earnings_window", "resolved window missing expiration/date")
+        return (
+            f"({r['ticker']}: next={r['next_earnings_date']} exp={r['expiration']} "
+            f"in_window={r['earnings_in_window']})"
+        )
+
+    check("get_earnings_window[contract]", _earnings_check, _verify_earnings)
+    check(
+        "get_earnings_window[bad-ticker]",
+        lambda: get_earnings_window(ticker="'; DROP--"),
+        lambda r: (
+            "(rejected malformed ticker)"
+            if r.get("error")
+            else _fail("get_earnings_window", "malformed ticker accepted!")
         ),
         expect_error=True,
     )
