@@ -470,10 +470,12 @@ def run_all() -> list[tuple[str, str]]:
     def _pool_liquidity_verify(r):
         if not r.get("rows"):
             # legitimate off-hours/holiday emptiness only if honestly noted
-            return "(0 rows + note)" if r.get("note") else _fail("get_pool_liquidity", "empty without note")
-        leaked = [
-            row for row in r["rows"] if set(row) & {"bid", "ask", "spread_pct", "mid"}
-        ]
+            return (
+                "(0 rows + note)"
+                if r.get("note")
+                else _fail("get_pool_liquidity", "empty without note")
+            )
+        leaked = [row for row in r["rows"] if set(row) & {"bid", "ask", "spread_pct", "mid"}]
         if leaked:
             _fail("get_pool_liquidity", f"NULL quote fields leaked on {len(leaked)} rows")
         missing_asof = [row for row in r["rows"] if not row.get("as_of")]
@@ -561,7 +563,9 @@ def run_all() -> list[tuple[str, str]]:
         for k in ("date", "close"):
             if b.get(k) is None:
                 _fail("get_contract_marks", f"bar missing {k}")
-        if "exit" in str(r.get("note", "")).lower() and "not simulate" not in str(r.get("note", "")):
+        if "exit" in str(r.get("note", "")).lower() and "not simulate" not in str(
+            r.get("note", "")
+        ):
             _fail("get_contract_marks", "boundary note drifted")
         return f"({r['bar_count']} daily bars {r['from_date']}..{r['to_date']})"
 
@@ -605,14 +609,18 @@ def run_all() -> list[tuple[str, str]]:
         feats = _ok(get_pool_features(limit=1), "replay-seed")
         row = feats["rows"][0] if isinstance(feats, dict) else feats[0]
         return replay_contract(
-            row["recommended_contract"], str(row["entry_day"])[:10],
-            target_pct=40, stop_pct=30,
+            row["recommended_contract"],
+            str(row["entry_day"])[:10],
+            target_pct=40,
+            stop_pct=30,
         )
 
     def _verify_replay(r):
         if r.get("bar_count", 0) < 1:
-            return "(0 bars + honest note)" if "No bars" in str(r.get("note", "")) else _fail(
-                "replay_contract", "empty replay without honest note"
+            return (
+                "(0 bars + honest note)"
+                if "No bars" in str(r.get("note", ""))
+                else _fail("replay_contract", "empty replay without honest note")
             )
         if not r.get("anchor") or not r["anchor"].get("price"):
             _fail("replay_contract", "missing 10:00 ET anchor")
@@ -620,8 +628,7 @@ def run_all() -> list[tuple[str, str]]:
         if fc.get("first") not in ("TARGET", "STOP", "AMBIGUOUS_SAME_BAR", "NONE"):
             _fail("replay_contract", f"bad first_crossing verdict: {fc.get('first')}")
         return (
-            f"({r['bar_count']} bars from {r['retrieved_from']}, "
-            f"first_crossing={fc.get('first')})"
+            f"({r['bar_count']} bars from {r['retrieved_from']}, first_crossing={fc.get('first')})"
         )
 
     check("replay_contract", _replay_check, _verify_replay)

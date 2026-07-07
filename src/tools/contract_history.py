@@ -197,8 +197,10 @@ def get_contract_marks(
         "bars": bars,
         "source": "upstream option daily aggregates (per-plan delay applies)",
         "note": (
-            ("No bars in this window — the contract may not have traded, or the "
-             "window predates its listing / postdates its expiry. ")
+            (
+                "No bars in this window — the contract may not have traded, or the "
+                "window predates its listing / postdates its expiry. "
+            )
             if not bars
             else ""
         )
@@ -339,8 +341,11 @@ def replay_contract(
         "retrieved_from": retrieved_from,
         "session_complete": session_complete,
         "note": (
-            ("No bars this session — the contract may not have traded that day. "
-             if not bars else "")
+            (
+                "No bars this session — the contract may not have traded that day. "
+                if not bars
+                else ""
+            )
             + (
                 ""
                 if session_complete
@@ -367,8 +372,11 @@ def replay_contract(
         "definition": (
             "close of the first bar at/after 10:00 ET (pool entry convention; "
             "no slippage applied)"
-            + (" — NOTE: no 10:00+ bar this session, anchored to the first bar"
-               if anchored_late else "")
+            + (
+                " — NOTE: no 10:00+ bar this session, anchored to the first bar"
+                if anchored_late
+                else ""
+            )
         ),
     }
 
@@ -389,13 +397,18 @@ def replay_contract(
             None,
         )
         first_s = next(
-            (b["t"] for b in after
-             if s_lvl is not None and b.get("low") is not None and b["low"] <= s_lvl),
+            (
+                b["t"]
+                for b in after
+                if s_lvl is not None and b.get("low") is not None and b["low"] <= s_lvl
+            ),
             None,
         )
         if first_t and first_s:
-            first = "AMBIGUOUS_SAME_BAR" if first_t == first_s else (
-                "TARGET" if first_t < first_s else "STOP"
+            first = (
+                "AMBIGUOUS_SAME_BAR"
+                if first_t == first_s
+                else ("TARGET" if first_t < first_s else "STOP")
             )
         elif first_t:
             first = "TARGET"

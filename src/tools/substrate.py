@@ -805,9 +805,7 @@ def _score_trailing_rule(
                     "Thin tape: unprinted minutes are invisible — treat as "
                     "evidence, not tick-perfect truth."
                 ),
-                "research_only": (
-                    "Excursion evidence, not exit advice — the exit is yours."
-                ),
+                "research_only": ("Excursion evidence, not exit advice — the exit is yours."),
                 "disclaimer": _COMPOSITE_DISCLAIMER,
             },
         }
@@ -902,7 +900,9 @@ def estimate_exit_rule(
 
     if rule == "trailing":
         if trail_pct is None:
-            return {"error": "rule='trailing' requires trail_pct (percent giveback off the running peak)"}
+            return {
+                "error": "rule='trailing' requires trail_pct (percent giveback off the running peak)"
+            }
         return _score_trailing_rule(
             trail=max(5.0, min(95.0, abs(float(trail_pct)))) / 100.0,
             act=max(0.0, min(300.0, abs(float(activation_pct)))) / 100.0,
@@ -941,10 +941,7 @@ def estimate_exit_rule(
 
         # --- exact-label stats when the bracket matches an engine-labeled rule ---
         label_rule = _EXACT_LABEL_RULES[horizon]
-        is_exact = (
-            abs(t - label_rule["target"]) < 1e-9
-            and abs(abs(s) - label_rule["stop"]) < 1e-9
-        )
+        is_exact = abs(t - label_rule["target"]) < 1e-9 and abs(abs(s) - label_rule["stop"]) < 1e-9
         if is_exact:
             lc = label_rule["label_col"]
             illiq = "IFNULL(illiquid_exit, FALSE)" if horizon == "same_day" else "FALSE"

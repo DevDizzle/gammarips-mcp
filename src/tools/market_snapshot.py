@@ -180,9 +180,7 @@ def _read_cache(symbol: str):
         job = _bq.query(
             q,
             job_config=bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("contract", "STRING", symbol)
-                ]
+                query_parameters=[bigquery.ScalarQueryParameter("contract", "STRING", symbol)]
             ),
         )
         for row in job.result():
@@ -267,9 +265,7 @@ def _fetch_upstream_live(symbol: str, underlying: str) -> dict[str, Any]:
     last_trade = res.get("last_trade") or {}
     greeks = res.get("greeks") or {}
     greeks_out = {
-        k: greeks.get(k)
-        for k in ("delta", "gamma", "theta", "vega")
-        if greeks.get(k) is not None
+        k: greeks.get(k) for k in ("delta", "gamma", "theta", "vega") if greeks.get(k) is not None
     }
 
     underlying_price = (res.get("underlying_asset") or {}).get("price")
@@ -482,10 +478,10 @@ def get_pool_liquidity(
     WITH latest AS (
       SELECT *, ROW_NUMBER() OVER (PARTITION BY contract ORDER BY as_of DESC) AS rn
       FROM {_POOL_LIQ_TABLE}
-      WHERE {' AND '.join(where)}
+      WHERE {" AND ".join(where)}
         AND scan_date = (
           SELECT MAX(scan_date) FROM {_POOL_LIQ_TABLE}
-          WHERE {' AND '.join(where)}
+          WHERE {" AND ".join(where)}
         )
     )
     SELECT * EXCEPT(rn) FROM latest WHERE rn = 1
@@ -516,8 +512,7 @@ def get_pool_liquidity(
             "rows": payloads,
             "freshness_note": (
                 "One row per contract, most recent read first-per-contract; "
-                "judge staleness from each row's as_of (ET). "
-                + _REFRESH_CADENCE_NOTE
+                "judge staleness from each row's as_of (ET). " + _REFRESH_CADENCE_NOTE
             ),
         }
     except Exception as e:
