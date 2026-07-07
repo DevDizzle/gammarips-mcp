@@ -48,6 +48,10 @@ except Exception as e:  # noqa: BLE001
 
 _FEATURES_VIEW = "`profitscout-fida8.profit_scout.enriched_features_v1`"
 _OUTCOMES_TABLE = "`profitscout-fida8.profit_scout.enriched_option_outcomes`"
+# Minute-path companion table (engine must-fix #6g, backfilled 2026-07-07):
+# per-minute bars over each candidate's 3-trading-day excursion window.
+# Powers EXACT first-crossing resolution + trailing-rule scoring (TF-14).
+_MINUTE_PATHS_TABLE = "`profitscout-fida8.profit_scout.option_minute_paths`"
 
 # Same-day GIGO bracket (V7.1 live policy) and the legacy 3-day companion
 # bracket, in FRACTION units as stored in the label-semantics columns.
@@ -624,69 +628,286 @@ def get_outcome_summary(
         return {"error": safe_error(e, "get_outcome_summary")}
 
 
+def _score_trailing_rule(
+    trail: float,
+    act: float,
+    s: float,
+    horizon: str,
+    scan_date_from: str | None,
+    scan_date_to: str | None,
+) -> dict[str, Any]:
+    """TF-14: replay a trailing rule bar-by-bar on the minute-path tape, in
+    SQL. Mechanics (documented, conservative):
+      * anchor = opp_entry_price / opp_entry_timestamp (the surface's 10:00 ET
+        entry mark — this ALREADY embeds the engine's entry-slippage fill;
+        no EXIT slippage is applied);
+      * the trail level rides the PRIOR-bar running peak — a new intra-bar
+        high can only arm/move the trail from the NEXT bar (no peak-then-drop
+        assumption inside one bar);
+      * effective stop per bar = GREATEST(hard stop, trail level once armed);
+        a bar whose low touches it exits at LEAST(bar open, level) — gap-down
+        opens fill at the open, not the level;
+      * never stopped -> exit at the window's last bar close (TIMEOUT);
+      * horizon 'same_day' = day-1 bars through 15:45 ET (the GIGO flat time);
+        '3d' = the full 3-trading-day excursion window.
+    """
+    try:
+        params: list = [
+            bigquery.ScalarQueryParameter("trail", "FLOAT64", trail),
+            bigquery.ScalarQueryParameter("act", "FLOAT64", act),
+            bigquery.ScalarQueryParameter("s", "FLOAT64", s),
+        ]
+        filters = ["TRUE"]
+        if scan_date_from:
+            filters.append("scan_date >= @dfrom")
+            params.append(bigquery.ScalarQueryParameter("dfrom", "DATE", scan_date_from))
+        if scan_date_to:
+            filters.append("scan_date <= @dto")
+            params.append(bigquery.ScalarQueryParameter("dto", "DATE", scan_date_to))
+        where = " AND ".join(filters)
+
+        bar_filter = (
+            "AND m.day_index = 1 AND TIME(m.ts, 'America/New_York') <= '15:45:00'"
+            if horizon == "same_day"
+            else ""
+        )
+
+        q = f"""
+        WITH anchors AS (
+            SELECT recommended_contract AS contract, entry_day,
+                   opp_entry_price AS entry_px, opp_entry_timestamp AS entry_ts
+            FROM {_OUTCOMES_TABLE}
+            WHERE {where} AND opp_status = 'OK' AND opp_entry_price > 0
+        ),
+        bars AS (
+            SELECT a.contract, a.entry_day, a.entry_px,
+                   m.ts, m.open, m.high, m.low, m.close
+            FROM anchors a
+            JOIN {_MINUTE_PATHS_TABLE} m
+              ON m.contract = a.contract AND m.entry_day = a.entry_day
+             AND m.ts >= a.entry_ts {bar_filter}
+        ),
+        runs AS (
+            SELECT *,
+                   MAX(high) OVER (
+                       PARTITION BY contract, entry_day ORDER BY ts
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                   ) AS prior_peak
+            FROM bars
+        ),
+        levels AS (
+            SELECT *,
+                   CASE
+                       WHEN prior_peak IS NOT NULL
+                            AND prior_peak >= entry_px * (1 + @act)
+                       THEN GREATEST(entry_px * (1 + @s), prior_peak * (1 - @trail))
+                       ELSE entry_px * (1 + @s)
+                   END AS eff_stop
+            FROM runs
+        ),
+        per_contract AS (
+            SELECT contract, entry_day, ANY_VALUE(entry_px) AS entry_px,
+                   ARRAY_AGG(
+                       IF(low <= eff_stop,
+                          STRUCT(ts, LEAST(IFNULL(open, eff_stop), eff_stop) AS px),
+                          NULL) IGNORE NULLS
+                       ORDER BY ts LIMIT 1
+                   )[SAFE_OFFSET(0)] AS first_stop,
+                   ARRAY_AGG(STRUCT(ts, close AS px) ORDER BY ts DESC LIMIT 1)[OFFSET(0)]
+                       AS last_bar
+            FROM levels
+            GROUP BY contract, entry_day
+        ),
+        returns AS (
+            SELECT contract, entry_day,
+                   SAFE_DIVIDE(
+                       IF(first_stop IS NOT NULL, first_stop.px, last_bar.px),
+                       entry_px
+                   ) - 1 AS ret,
+                   first_stop IS NOT NULL AS stopped
+            FROM per_contract
+        )
+        SELECT COUNT(*) AS n,
+               ROUND(SAFE_DIVIDE(COUNTIF(ret > 0), COUNT(*)), 4) AS win_rate,
+               ROUND(AVG(ret), 4) AS avg_ret,
+               ROUND(APPROX_QUANTILES(ret, 100)[OFFSET(50)], 4) AS med_ret,
+               ROUND(APPROX_QUANTILES(ret, 100)[OFFSET(10)], 4) AS p10,
+               ROUND(APPROX_QUANTILES(ret, 100)[OFFSET(90)], 4) AS p90,
+               ROUND(SAFE_DIVIDE(COUNTIF(stopped), COUNT(*)), 4) AS stop_share
+        FROM returns
+        """
+        row = next(
+            iter(
+                client.query(
+                    q, job_config=bigquery.QueryJobConfig(query_parameters=params)
+                ).result()
+            ),
+            None,
+        )
+
+        # coverage: anchors that had NO minute bars are excluded from scoring
+        q_cov = f"""
+        SELECT COUNT(*) AS n_anchors
+        FROM {_OUTCOMES_TABLE}
+        WHERE {where} AND opp_status = 'OK' AND opp_entry_price > 0
+        """
+        cov_row = next(
+            iter(
+                client.query(
+                    q_cov, job_config=bigquery.QueryJobConfig(query_parameters=params)
+                ).result()
+            ),
+            None,
+        )
+        n_anchors = int(cov_row.n_anchors) if cov_row else 0
+        n_scored = int(row.n) if row else 0
+
+        return {
+            "params": {
+                "rule": "trailing",
+                "trail_pct": round(trail * 100, 2),
+                "activation_pct": round(act * 100, 2),
+                "hard_stop_pct": round(s * 100, 2),
+                "horizon": horizon,
+                "window": (
+                    "day-1 bars through 15:45 ET (GIGO flat time)"
+                    if horizon == "same_day"
+                    else "3 trading days incl. entry day"
+                ),
+            },
+            "n_scored": n_scored,
+            "n_excluded_no_bars": max(0, n_anchors - n_scored),
+            "est_win_rate": row.win_rate if row else None,
+            "avg_return": row.avg_ret if row else None,
+            "median_return": row.med_ret if row else None,
+            "p10": row.p10 if row else None,
+            "p90": row.p90 if row else None,
+            "stop_share": row.stop_share if row else None,
+            "timeout_share": (
+                round(1 - row.stop_share, 4) if row and row.stop_share is not None else None
+            ),
+            "meta": {
+                "mechanics": (
+                    "Bar-level replay on the minute tape: trail rides the "
+                    "PRIOR-bar running peak, armed once the premium has traded "
+                    "at/above entry x (1 + activation); effective stop = "
+                    "max(hard stop, trail); touch fills at min(bar open, "
+                    "level); never-stopped rides to the window's last bar "
+                    "close. FRACTION units in returns. Entry anchor embeds the "
+                    "engine's entry-slippage fill; no EXIT slippage applied. "
+                    "Thin tape: unprinted minutes are invisible — treat as "
+                    "evidence, not tick-perfect truth."
+                ),
+                "research_only": (
+                    "Excursion evidence, not exit advice — the exit is yours."
+                ),
+                "disclaimer": _COMPOSITE_DISCLAIMER,
+            },
+        }
+    except Exception as e:
+        return {"error": safe_error(e, "estimate_exit_rule")}
+
+
 def estimate_exit_rule(
-    target_pct: float,
-    stop_pct: float,
+    target_pct: float | None = None,
+    stop_pct: float = 30,
     horizon: str = "3d",
     scan_date_from: str | None = None,
     scan_date_to: str | None = None,
+    rule: str = "bracket",
+    trail_pct: float | None = None,
+    activation_pct: float = 0,
 ) -> dict[str, Any]:
     """
-    RESEARCH-ONLY — "bring your exit, we score it": classify every
-    closed-window pool contract against YOUR bracket (target/stop) using the
-    realized opportunity surface (MFE/MAE extremes over the 3-trading-day
-    window).
+    RESEARCH-ONLY — "bring your exit, we score it": score YOUR exit rule
+    against every closed-window pool contract. Two rule families:
+
+    * rule="bracket" (default): fixed target/stop, classified against the
+      realized opportunity surface (MFE/MAE extremes over the 3-trading-day
+      window). Rows where BOTH levels were crossed are resolved by EXACT
+      first-crossing from the minute-path tape where coverage exists
+      (TARGET_EXACT / STOP_EXACT); only uncovered rows fall back to the
+      extreme-order heuristic — check `heuristic_share` (now typically ~0).
+    * rule="trailing" (TF-14): hard initial stop (stop_pct) + a trailing stop
+      that gives back trail_pct from the running peak, optionally armed only
+      after +activation_pct. Replayed bar-by-bar on the minute-path tape in
+      SQL; contracts never stopped ride to the window end (last bar close).
 
     This tool surfaces excursion EVIDENCE; it does not prescribe or validate
     an exit — the exit is yours. Measured context (2026-07-06 pool study):
     every fixed target <= +80% tested EV-NEGATIVE pool-wide, because cheap
     targets amputate the right tail that pays for the ~half of contracts that
-    never pop. Read any single bracket's stats as a description of the
-    surface, never as a strategy.
+    never pop. Read any single rule's stats as a description of the surface,
+    never as a strategy.
 
-    Classification per contract:
-      * TARGET      — peak reached your target and the trough never breached
-                      your stop (definitive).
-      * STOP        — trough breached your stop and the peak never reached
-                      your target (definitive).
-      * TARGET_HEURISTIC / STOP_HEURISTIC — BOTH levels were crossed inside
-                      the window. First-crossing order is not recoverable from
-                      extremes alone, so the row is resolved by which EXTREME
-                      came first (minutes_to_peak vs minutes_to_trough) and
-                      tagged as heuristic. Treat these as best-effort, not
-                      exact — the heuristic share is reported so you can bound
-                      results with and without it.
-      * TIMEOUT     — neither level was hit; the true exit return is unknown
-                      (window-end price is not stored) but bounded by
-                      [avg MAE, avg MFE] of the timeout group.
+    Bracket classification per contract:
+      * TARGET / STOP — only one level was crossed (definitive from extremes).
+      * TARGET_EXACT / STOP_EXACT — both crossed; resolved by exact first
+        touch on the minute tape (same-bar touch resolves STOP-first,
+        matching the engine labeler's pessimistic rule).
+      * TARGET_HEURISTIC / STOP_HEURISTIC — both crossed, no minute coverage;
+        resolved by which EXTREME came first. Best-effort, not exact.
+      * TIMEOUT — neither level hit; true exit return bounded by
+        [avg MAE, avg MFE] of the timeout group.
 
     Also returns `exact_label_match` when your bracket equals a rule the
     engine labels exactly: same_day +40/-30 (`realized_return_pct`, the live
     V7.1 GIGO policy) or 3d +80/-60 (`realized_return_pct_3d`) — exact labels
     include real fill/slippage mechanics and beat any surface estimate.
 
+    Thin-tape caveat (both families): option minutes with no prints have no
+    bar and lows between prints are unobservable — touch-based results are
+    evidence, not tick-perfect truth. No slippage is applied.
+
     Args:
-        target_pct: Profit target in PERCENT of entry premium (e.g. 40 = +40%).
-            Clamped 5-300.
-        stop_pct: Stop in PERCENT (e.g. -30 or 30 both mean a -30% stop).
-            Clamped magnitude 5-95.
-        horizon: Only "3d" is supported for surface classification (the
-            excursion window is 3 trading days). "same_day" returns exact-label
-            stats only when the bracket matches +40/-30, else an explanation.
+        target_pct: bracket profit target in PERCENT of entry premium
+            (e.g. 40 = +40%). Clamped 5-300. Required for rule="bracket";
+            ignored for rule="trailing".
+        stop_pct: initial/hard stop in PERCENT (e.g. -30 or 30 both mean a
+            -30% stop). Clamped magnitude 5-95. Used by BOTH rule families.
+        horizon: "3d" (the excursion window) or "same_day" (trailing only:
+            day-1 bars through 15:45 ET; bracket: exact-label stats only).
         scan_date_from / scan_date_to: YYYY-MM-DD range bounds (inclusive).
+        rule: "bracket" (default) or "trailing".
+        trail_pct: trailing giveback in PERCENT off the running peak
+            (e.g. 25 = exit when premium falls 25% from its high-water mark).
+            Required for rule="trailing". Clamped 5-95.
+        activation_pct: arm the trail only once the premium has traded
+            at/above entry x (1 + this many PERCENT). Default 0 = armed once
+            the premium has traded at/above the entry mark. Clamped 0-300.
 
     Returns:
-        {params, n_classified, buckets, est_win_rate, ev_bounds,
-         exact_label_match?, meta}
+        bracket: {params, n_classified, buckets, heuristic_share,
+                  est_win_rate, ev_bounds, exact_label_match?, meta}
+        trailing: {params, n_scored, n_excluded_no_bars, stop_share,
+                   timeout_share, est_win_rate, avg_return, median_return,
+                   p10, p90, meta}
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
 
     if horizon not in ("3d", "same_day"):
         return {"error": "horizon must be '3d' or 'same_day'"}
+    if rule not in ("bracket", "trailing"):
+        return {"error": "rule must be 'bracket' or 'trailing'"}
 
-    t = max(5.0, min(300.0, abs(float(target_pct)))) / 100.0
     s = -max(5.0, min(95.0, abs(float(stop_pct)))) / 100.0
+
+    if rule == "trailing":
+        if trail_pct is None:
+            return {"error": "rule='trailing' requires trail_pct (percent giveback off the running peak)"}
+        return _score_trailing_rule(
+            trail=max(5.0, min(95.0, abs(float(trail_pct)))) / 100.0,
+            act=max(0.0, min(300.0, abs(float(activation_pct)))) / 100.0,
+            s=s,
+            horizon=horizon,
+            scan_date_from=scan_date_from,
+            scan_date_to=scan_date_to,
+        )
+
+    if target_pct is None:
+        return {"error": "rule='bracket' requires target_pct"}
+    t = max(5.0, min(300.0, abs(float(target_pct)))) / 100.0
 
     try:
         filters = ["TRUE"]
@@ -712,10 +933,13 @@ def estimate_exit_rule(
         }
 
         # --- exact-label stats when the bracket matches an engine-labeled rule ---
-        rule = _EXACT_LABEL_RULES[horizon]
-        is_exact = abs(t - rule["target"]) < 1e-9 and abs(abs(s) - rule["stop"]) < 1e-9
+        label_rule = _EXACT_LABEL_RULES[horizon]
+        is_exact = (
+            abs(t - label_rule["target"]) < 1e-9
+            and abs(abs(s) - label_rule["stop"]) < 1e-9
+        )
         if is_exact:
-            lc = rule["label_col"]
+            lc = label_rule["label_col"]
             illiq = "IFNULL(illiquid_exit, FALSE)" if horizon == "same_day" else "FALSE"
             q = f"""
                 SELECT
@@ -744,10 +968,10 @@ def estimate_exit_rule(
         if horizon == "same_day":
             if not is_exact:
                 result["error"] = (
-                    "Surface-based classification only supports horizon='3d' (the "
-                    "excursion window). For same_day, only the exact +40/-30 live "
-                    "bracket is labeled; other same-day brackets need minute-path "
-                    "data the substrate does not store yet."
+                    "Surface-based BRACKET classification only supports "
+                    "horizon='3d' (the excursion window). For same_day, only the "
+                    "exact +40/-30 live bracket is labeled. (A same-day TRAILING "
+                    "rule IS scorable — pass rule='trailing'.)"
                 )
             return result
 
@@ -797,10 +1021,72 @@ def estimate_exit_rule(
         to_mfe = buckets.get("TIMEOUT", {}).get("avg_mfe") or 0.0
         to_mae = buckets.get("TIMEOUT", {}).get("avg_mae") or 0.0
 
-        # EV bounds: definitive + heuristic rows realize their level; TIMEOUT
-        # rows are bounded by the timeout group's [avg MAE, avg MFE].
-        wins = n_target + n_th
-        losses = n_stop + n_sh
+        # TF-14: resolve both-levels-crossed rows by EXACT first touch on the
+        # minute-path tape (same-bar touch -> STOP-first, the labeler's
+        # pessimistic rule). Only rows without minute coverage stay heuristic.
+        # Fail-soft: any error here keeps the pure-heuristic classification.
+        n_te = n_se = 0
+        if (n_th + n_sh) > 0:
+            try:
+                q_exact = f"""
+                    WITH anchors AS (
+                        SELECT recommended_contract AS contract, entry_day,
+                               opp_entry_price AS entry_px,
+                               opp_entry_timestamp AS entry_ts,
+                               IFNULL(opp_minutes_to_peak <= opp_minutes_to_trough,
+                                      FALSE) AS peak_first
+                        FROM {_OUTCOMES_TABLE}
+                        WHERE {where} AND opp_status = 'OK'
+                          AND opp_entry_price > 0
+                          AND opp_peak_return >= @t AND opp_trough_return <= @s
+                    ),
+                    touches AS (
+                        SELECT a.contract, a.entry_day,
+                               ANY_VALUE(a.peak_first) AS peak_first,
+                               MIN(IF(m.high >= a.entry_px * (1 + @t), m.ts, NULL)) AS ft,
+                               MIN(IF(m.low <= a.entry_px * (1 + @s), m.ts, NULL)) AS fs
+                        FROM anchors a
+                        LEFT JOIN {_MINUTE_PATHS_TABLE} m
+                          ON m.contract = a.contract AND m.entry_day = a.entry_day
+                         AND m.ts >= a.entry_ts
+                        GROUP BY a.contract, a.entry_day
+                    )
+                    SELECT
+                        COUNTIF(ft IS NOT NULL AND (fs IS NULL OR ft < fs)) AS n_te,
+                        COUNTIF(fs IS NOT NULL AND (ft IS NULL OR fs <= ft)) AS n_se,
+                        COUNTIF(ft IS NULL AND fs IS NULL AND peak_first) AS n_th_resid,
+                        COUNTIF(ft IS NULL AND fs IS NULL AND NOT peak_first) AS n_sh_resid
+                    FROM touches
+                """
+                ex_row = next(
+                    iter(
+                        client.query(
+                            q_exact,
+                            job_config=bigquery.QueryJobConfig(query_parameters=params),
+                        ).result()
+                    ),
+                    None,
+                )
+                if ex_row is not None:
+                    n_te, n_se = int(ex_row.n_te), int(ex_row.n_se)
+                    n_th, n_sh = int(ex_row.n_th_resid), int(ex_row.n_sh_resid)
+                    buckets.pop("TARGET_HEURISTIC", None)
+                    buckets.pop("STOP_HEURISTIC", None)
+                    if n_te:
+                        buckets["TARGET_EXACT"] = {"n": n_te}
+                    if n_se:
+                        buckets["STOP_EXACT"] = {"n": n_se}
+                    if n_th:
+                        buckets["TARGET_HEURISTIC"] = {"n": n_th}
+                    if n_sh:
+                        buckets["STOP_HEURISTIC"] = {"n": n_sh}
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"exact first-crossing resolution failed (heuristic kept): {e}")
+
+        # EV bounds: definitive + exact + heuristic rows realize their level;
+        # TIMEOUT rows are bounded by the timeout group's [avg MAE, avg MFE].
+        wins = n_target + n_te + n_th
+        losses = n_stop + n_se + n_sh
         ev_low = (wins * t + losses * s + n_to * to_mae) / n
         ev_high = (wins * t + losses * s + n_to * to_mfe) / n
 
@@ -809,10 +1095,20 @@ def estimate_exit_rule(
                 "n_classified": n,
                 "buckets": buckets,
                 "heuristic_share": round((n_th + n_sh) / n, 4),
+                "exact_resolution": {
+                    "resolved_by_minute_tape": n_te + n_se,
+                    "residual_no_bars": n_th + n_sh,
+                    "note": (
+                        "Both-levels-crossed rows resolved by exact first touch "
+                        "on the minute-path tape (same-bar -> STOP-first, the "
+                        "labeler's pessimistic rule); residual rows lack minute "
+                        "coverage and use the extreme-order heuristic."
+                    ),
+                },
                 "est_win_rate": round(wins / n, 4),
                 "est_win_rate_definitive_only": (
-                    round(n_target / (n_target + n_stop + n_to), 4)
-                    if (n_target + n_stop + n_to) > 0
+                    round((n_target + n_te) / (n_target + n_te + n_stop + n_se + n_to), 4)
+                    if (n_target + n_te + n_stop + n_se + n_to) > 0
                     else None
                 ),
                 "ev_bounds": {

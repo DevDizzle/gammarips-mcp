@@ -76,7 +76,10 @@ _REFRESH_CADENCE_NOTE = (
     "Cache rows are refreshed for the whole current pool every ~10 minutes "
     "during regular trading hours (09:30-16:00 ET) plus one pre-open pass; "
     "open_interest itself updates upstream once each morning. No bid/ask/"
-    "spread on this data plan (fields appear only if a quote feed is added)."
+    "spread on this data plan (fields appear only if a quote feed is added); "
+    "last_trade is served only when upstream provides it (often absent on "
+    "this plan) — day.close is the reliable delayed session mark, "
+    "day.last_updated its timestamp."
 )
 
 
@@ -394,9 +397,10 @@ def get_contract_snapshot(contract: str, live: bool = False) -> dict[str, Any]:
         payload["retrieved_from"] = "upstream_live"
         payload["freshness_note"] = (
             "Force-fresh upstream read; as_of is the server request time (ET); "
-            "judge staleness from day.last_updated and last_trade.timestamp. "
-            "open_interest updates once daily in the morning; day_volume is "
-            "the live session. No bid/ask/spread on this data plan."
+            "judge staleness from day.last_updated. open_interest updates once "
+            "daily in the morning; day_volume is the live (delayed) session; "
+            "day.close is the reliable session mark — last_trade appears only "
+            "when upstream provides it. No bid/ask/spread on this data plan."
         )
         return payload
     except Exception as e:

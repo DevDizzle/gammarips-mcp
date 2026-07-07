@@ -44,7 +44,7 @@ SERVER_VERSION = "3.0.0"
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
 # Import tools
-from tools.contract_history import get_contract_marks
+from tools.contract_history import get_contract_marks, replay_contract
 from tools.earnings import get_earnings_window
 from tools.education import get_market_calendar_status, get_signal_explainer
 from tools.historical import get_historical_performance
@@ -74,7 +74,7 @@ from tools.substrate import (
 )
 from tools.web_search import web_search
 
-# Register tools with the MCP server (28 tools).
+# Register tools with the MCP server (29 tools).
 # NOTE: docstrings are the tool descriptions — keep them agent-facing.
 _ALL_TOOLS = {
     # live pool
@@ -88,8 +88,10 @@ _ALL_TOOLS = {
     "get_pool_liquidity": get_pool_liquidity,
     # safety rails the harness must reconstruct (RM-003 — earnings window)
     "get_earnings_window": get_earnings_window,
-    # bring-your-own-rule data reads (RM-004 — marks; no exit logic here)
+    # bring-your-own-rule data reads (RM-004/RM-002 — marks + minute replay;
+    # no exit logic here)
     "get_contract_marks": get_contract_marks,
+    "replay_contract": replay_contract,
     # research substrate
     "get_pool_features": get_pool_features,
     "get_opportunity_surface": get_opportunity_surface,

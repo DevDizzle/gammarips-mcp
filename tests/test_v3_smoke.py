@@ -123,7 +123,7 @@ def _ok(result, name: str):
 def run_all() -> list[tuple[str, str]]:
     sys.path.insert(0, "src")
 
-    from tools.contract_history import get_contract_marks
+    from tools.contract_history import get_contract_marks, replay_contract
     from tools.earnings import get_earnings_window
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
@@ -595,6 +595,83 @@ def run_all() -> list[tuple[str, str]]:
             "(rejected over-cap span)"
             if r.get("error") and "capped" in r["error"]
             else _fail("get_contract_marks", "over-cap span accepted!")
+        ),
+        expect_error=True,
+    )
+
+    # --- RM-002 + TF-14 (2026-07-07): minute replay + trailing scoring -------
+    def _replay_check():
+        # seed from the labeled substrate so the minute-path table has the row
+        feats = _ok(get_pool_features(limit=1), "replay-seed")
+        row = feats["rows"][0] if isinstance(feats, dict) else feats[0]
+        return replay_contract(
+            row["recommended_contract"], str(row["entry_day"])[:10],
+            target_pct=40, stop_pct=30,
+        )
+
+    def _verify_replay(r):
+        if r.get("bar_count", 0) < 1:
+            return "(0 bars + honest note)" if "No bars" in str(r.get("note", "")) else _fail(
+                "replay_contract", "empty replay without honest note"
+            )
+        if not r.get("anchor") or not r["anchor"].get("price"):
+            _fail("replay_contract", "missing 10:00 ET anchor")
+        fc = r.get("first_crossing") or {}
+        if fc.get("first") not in ("TARGET", "STOP", "AMBIGUOUS_SAME_BAR", "NONE"):
+            _fail("replay_contract", f"bad first_crossing verdict: {fc.get('first')}")
+        return (
+            f"({r['bar_count']} bars from {r['retrieved_from']}, "
+            f"first_crossing={fc.get('first')})"
+        )
+
+    check("replay_contract", _replay_check, _verify_replay)
+    check(
+        "replay_contract[bad-date]",
+        lambda: replay_contract("O:AAPL260717C00315000", "2026-02-30"),
+        lambda r: (
+            "(rejected impossible date)"
+            if r.get("error")
+            else _fail("replay_contract", "impossible date accepted")
+        ),
+        expect_error=True,
+    )
+
+    def _verify_trailing(r):
+        if r.get("n_scored", 0) < 100:
+            _fail("estimate_exit_rule[trailing]", f"n_scored={r.get('n_scored')}")
+        if r.get("params", {}).get("rule") != "trailing":
+            _fail("estimate_exit_rule[trailing]", "params.rule missing")
+        if "not exit advice" not in str(r.get("meta", {}).get("research_only", "")):
+            _fail("estimate_exit_rule[trailing]", "research-only framing missing")
+        return (
+            f"(n={r['n_scored']}, wr={r['est_win_rate']}, avg={r['avg_return']}, "
+            f"stop_share={r['stop_share']})"
+        )
+
+    check(
+        "estimate_exit_rule[trailing]",
+        lambda: estimate_exit_rule(stop_pct=30, rule="trailing", trail_pct=25, activation_pct=20),
+        _verify_trailing,
+    )
+    check(
+        "estimate_exit_rule[exact-crossing]",
+        lambda: estimate_exit_rule(target_pct=40, stop_pct=30),
+        lambda r: (
+            f"(heuristic_share={r['heuristic_share']}, exact={r['exact_resolution']['resolved_by_minute_tape']})"
+            if r.get("heuristic_share", 1) <= 0.02 and r.get("exact_resolution")
+            else _fail(
+                "estimate_exit_rule",
+                f"TF-14 regression: heuristic_share={r.get('heuristic_share')}",
+            )
+        ),
+    )
+    check(
+        "estimate_exit_rule[trailing-missing-param]",
+        lambda: estimate_exit_rule(rule="trailing"),
+        lambda r: (
+            "(rejected missing trail_pct)"
+            if r.get("error")
+            else _fail("estimate_exit_rule", "trailing without trail_pct accepted")
         ),
         expect_error=True,
     )
