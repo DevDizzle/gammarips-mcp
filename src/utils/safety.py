@@ -76,6 +76,7 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"apiKey=[A-Za-z0-9_-]+", re.I), "apiKey=<redacted>"),
     # Upstream market-data vendor URLs (cosmetic — key is header-borne, never in URL)
     (re.compile(r"https?://api\.polygon\.io\S*", re.I), "<market-data-api>"),
+    (re.compile(r"https?://financialmodelingprep\.com\S*", re.I), "<earnings-api>"),
 )
 
 
@@ -83,7 +84,7 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 # string. Pattern-based redaction can't catch a bare token inside an arbitrary
 # exception message (2026-07-06 incident: a malformed-header ValueError echoed
 # the raw key), so the values themselves are scrubbed at redact time.
-_SENSITIVE_ENV_VARS = ("POLYGON_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CSE_ID")
+_SENSITIVE_ENV_VARS = ("POLYGON_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CSE_ID", "FMP_API_KEY")
 
 
 def redact(text: str) -> str:
