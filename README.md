@@ -75,6 +75,41 @@ claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-
   --header "Authorization: Bearer gr_live_your_key"
 ```
 
+### Cursor
+
+Settings → MCP → Add new MCP server, or add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "gammarips": {
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
+      "headers": { "Authorization": "Bearer gr_live_your_key" }
+    }
+  }
+}
+```
+
+Omit `headers` for the free tier.
+
+### Cline
+
+MCP Servers → Remote Servers → Add, or add to `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "gammarips": {
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
+      "type": "streamableHttp",
+      "headers": { "Authorization": "Bearer gr_live_your_key" }
+    }
+  }
+}
+```
+
+Omit `headers` for the free tier (8 anon tools).
+
 ### Generic MCP config
 
 ```json
@@ -88,6 +123,8 @@ claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-
 ```
 
 Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
+
+Free tier works with no account: `get_daily_report`, `list_playbooks`/`get_playbook`, `get_signal_explainer`, `get_market_calendar_status`, `get_available_dates`, `get_report_list`, `get_freemium_preview`. Pro tools require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing).
 
 ## Local development
 
