@@ -46,7 +46,7 @@ mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080
 # Import tools
 from tools.education import get_market_calendar_status, get_signal_explainer
 from tools.historical import get_historical_performance
-from tools.market_snapshot import get_contract_snapshot
+from tools.market_snapshot import get_contract_snapshot, get_pool_liquidity
 from tools.metadata import get_available_dates, get_enriched_signal_schema
 from tools.overnight_signals import (
     get_enriched_signals,
@@ -72,7 +72,7 @@ from tools.substrate import (
 )
 from tools.web_search import web_search
 
-# Register tools with the MCP server (25 tools).
+# Register tools with the MCP server (26 tools).
 # NOTE: docstrings are the tool descriptions — keep them agent-facing.
 _ALL_TOOLS = {
     # live pool
@@ -80,8 +80,10 @@ _ALL_TOOLS = {
     "get_enriched_signals": get_enriched_signals,
     "get_signal_detail": get_signal_detail,
     "get_freemium_preview": get_freemium_preview,
-    # live market data (RM-001a — entry-day freshness; no quote fields)
+    # live market data (RM-001a + Priority-1A/1B — entry-day freshness,
+    # cache-first from the engine's ~10-min pool refresh; no quote fields)
     "get_contract_snapshot": get_contract_snapshot,
+    "get_pool_liquidity": get_pool_liquidity,
     # research substrate
     "get_pool_features": get_pool_features,
     "get_opportunity_surface": get_opportunity_surface,
