@@ -79,7 +79,9 @@ claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-
 
 ### Cursor
 
-Settings → MCP → Add new MCP server, or add to `.cursor/mcp.json`:
+**Easiest — install the plugin.** This repo is an [Open Plugins](https://open-plugins.com)-standard plugin (`.cursor-plugin/plugin.json`): it bundles the hosted MCP server plus a `gammarips-options-flow` skill that teaches your agent the data-not-advice workflow. Install it from the plugin marketplace (search "GammaRips") or point Cursor at this repo. It connects on the free tier out of the box; add your `gr_live_...` key for pro tools.
+
+Manual: Settings → MCP → Add new MCP server, or add to `.cursor/mcp.json`:
 
 ```json
 {

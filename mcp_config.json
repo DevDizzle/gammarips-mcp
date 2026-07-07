@@ -1,8 +1,7 @@
 {
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
-      "transport": "sse"
+      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp"
     }
   }
 }
