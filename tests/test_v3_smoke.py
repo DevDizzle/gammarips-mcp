@@ -123,6 +123,7 @@ def _ok(result, name: str):
 def run_all() -> list[tuple[str, str]]:
     sys.path.insert(0, "src")
 
+    from tools.contract_history import get_contract_marks
     from tools.earnings import get_earnings_window
     from tools.education import get_market_calendar_status, get_signal_explainer
     from tools.historical import get_historical_performance
@@ -540,6 +541,60 @@ def run_all() -> list[tuple[str, str]]:
             "(rejected malformed ticker)"
             if r.get("error")
             else _fail("get_earnings_window", "malformed ticker accepted!")
+        ),
+        expect_error=True,
+    )
+
+    # --- RM-004 data (2026-07-07): daily mark series -------------------------
+    def _marks_check():
+        rows = _ok(get_enriched_signals(limit=1), "marks-seed")
+        return get_contract_marks(rows[0]["recommended_contract"])
+
+    def _verify_marks(r):
+        if r.get("bar_count", 0) < 1:
+            # a brand-new contract can be legitimately bar-less — but only with
+            # the honest empty-window note
+            if "No bars" not in str(r.get("note", "")):
+                _fail("get_contract_marks", "empty series without honest note")
+            return "(0 bars + honest note)"
+        b = r["bars"][0]
+        for k in ("date", "close"):
+            if b.get(k) is None:
+                _fail("get_contract_marks", f"bar missing {k}")
+        if "exit" in str(r.get("note", "")).lower() and "not simulate" not in str(r.get("note", "")):
+            _fail("get_contract_marks", "boundary note drifted")
+        return f"({r['bar_count']} daily bars {r['from_date']}..{r['to_date']})"
+
+    check("get_contract_marks", _marks_check, _verify_marks)
+    check(
+        "get_contract_marks[bad-input]",
+        lambda: get_contract_marks("SPY"),
+        lambda r: (
+            "(rejected non-OCC ticker)"
+            if r.get("error")
+            else _fail("get_contract_marks", "non-OCC ticker accepted!")
+        ),
+        expect_error=True,
+    )
+    check(
+        "get_contract_marks[bad-date]",
+        lambda: get_contract_marks("O:AAPL260717C00315000", from_date="2026-02-30"),
+        lambda r: (
+            "(rejected impossible date)"
+            if r.get("error") and "real" in r["error"]
+            else _fail("get_contract_marks", "impossible date accepted/raised")
+        ),
+        expect_error=True,
+    )
+    check(
+        "get_contract_marks[span-cap]",
+        lambda: get_contract_marks(
+            "O:AAPL260717C00315000", from_date="2025-01-01", to_date="2026-07-01"
+        ),
+        lambda r: (
+            "(rejected over-cap span)"
+            if r.get("error") and "capped" in r["error"]
+            else _fail("get_contract_marks", "over-cap span accepted!")
         ),
         expect_error=True,
     )
