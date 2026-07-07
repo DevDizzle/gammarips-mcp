@@ -1,5 +1,7 @@
 # GammaRips MCP Server
 
+[![smithery badge](https://smithery.ai/badge/gammarips/Options-Intelligence)](https://smithery.ai/servers/gammarips/Options-Intelligence)
+
 Options-flow intelligence **primitives** for AI agents.
 
 Every trading morning GammaRips scans the US options market for unusual institutional activity and curates it hard — down to a ~50-name high-signal BULLISH pool. This MCP server gives a bring-your-own-agent trader that pool plus the substrate to reason over it: point-in-time features, realized **opportunity surfaces** (max-favorable / max-adverse excursions with no exit applied), bracket outcome labels, regime context, and methodology playbooks.
