@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.devdizzle/gammarips",
+  "name": "io.github.DevDizzle/gammarips",
   "title": "GammaRips Options Intelligence",
   "description": "Anti-firehose options-flow data for AI agents: curated daily pool, features, realized outcomes.",
   "version": "3.0.0",
