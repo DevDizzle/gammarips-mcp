@@ -197,6 +197,13 @@ def get_opportunity_surface(
     over a closed window. Only rows whose window has fully closed are returned
     by default (`opp_status='OK'`).
 
+    For the DISTRIBUTIONAL "typical path" summary of this surface — P(peak
+    reaches +X%) with confidence intervals, day-of-peak buckets (peaks land
+    day 2-3, not day 1), stop-touch rates, and the giveback pattern — use
+    `get_harvest_curve`; to score a specific exit rule against it, use
+    `estimate_exit_rule`. This tool returns the per-contract rows those
+    aggregate.
+
     Args:
         scan_date: YYYY-MM-DD — return just that scan date's pool.
         ticker: Optional ticker filter (across the lookback if no scan_date).
