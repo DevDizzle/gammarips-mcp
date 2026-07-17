@@ -3,7 +3,7 @@
   "name": "io.github.DevDizzle/gammarips",
   "title": "GammaRips Options Intelligence",
   "description": "Anti-firehose options-flow data for AI agents: curated daily pool, features, realized outcomes.",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "websiteUrl": "https://gammarips.com/developers",
   "repository": {
     "url": "https://github.com/DevDizzle/gammarips-mcp",
@@ -15,7 +15,7 @@
       "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
       "headers": [
         {
-          "description": "GammaRips API key (gr_live_...) sent as a Bearer token. Optional: 8 free-tier tools work without it; pro tools require an active subscription from https://gammarips.com/pricing.",
+          "description": "GammaRips API key (gr_live_...) sent as a Bearer token. Optional: 5 free-tier tools work without it; the 4 pro tools require an active subscription from https://gammarips.com/pricing.",
           "isRequired": false,
           "isSecret": true,
           "name": "Authorization"

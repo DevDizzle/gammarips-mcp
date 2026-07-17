@@ -13,18 +13,12 @@ import logging
 import re
 from typing import Any
 
-from google.cloud import bigquery
-
+from utils.data import BQ as client
+from utils.data import DATASET_FQN
+from utils.data import RAW_SCAN_TABLE as _RAW_SCAN
 from utils.safety import redact, safe_error
 
 logger = logging.getLogger(__name__)
-
-# Initialize client
-try:
-    client = bigquery.Client(project="profitscout-fida8")
-except Exception as e:
-    logger.error(f"Failed to initialize BigQuery client: {e}")
-    client = None
 
 _TAG_RE = re.compile(
     r"^\[(?P<classification>feature|label|opportunity|regime_telemetry|identity)"
@@ -61,11 +55,11 @@ def get_available_dates() -> list[dict[str, Any]]:
         return [{"error": "BigQuery client not initialized"}]
 
     try:
-        query = """
+        query = f"""
             SELECT
                 scan_date,
                 COUNT(*) as signal_count
-            FROM `profitscout-fida8.profit_scout.overnight_signals`
+            FROM {_RAW_SCAN}
             GROUP BY scan_date
             ORDER BY scan_date DESC
             LIMIT 30
@@ -108,10 +102,10 @@ def get_enriched_signal_schema() -> dict[str, Any]:
         return {"error": "BigQuery client not initialized"}
 
     try:
-        class_query = """
+        class_query = f"""
             SELECT p.column_name, c.data_type, p.description
-            FROM `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` p
-            JOIN `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMNS` c
+            FROM `{DATASET_FQN}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS` p
+            JOIN `{DATASET_FQN}.INFORMATION_SCHEMA.COLUMNS` c
               ON c.table_name = p.table_name AND c.column_name = p.column_name
             WHERE p.table_name = 'enriched_option_outcomes'
             ORDER BY c.ordinal_position
@@ -130,9 +124,9 @@ def get_enriched_signal_schema() -> dict[str, Any]:
                 }
             )
 
-        view_query = """
+        view_query = f"""
             SELECT column_name
-            FROM `profitscout-fida8.profit_scout.INFORMATION_SCHEMA.COLUMNS`
+            FROM `{DATASET_FQN}.INFORMATION_SCHEMA.COLUMNS`
             WHERE table_name = 'enriched_features_v1'
             ORDER BY ordinal_position
         """

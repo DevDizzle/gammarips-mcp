@@ -21,15 +21,11 @@ from typing import Any
 
 from google.cloud import bigquery
 
+from utils.data import BQ as client
+from utils.data import FORWARD_PAPER_LEDGER
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
-
-try:
-    client = bigquery.Client(project="profitscout-fida8")
-except Exception as e:  # noqa: BLE001
-    logger.error(f"Failed to initialize BigQuery client: {e}")
-    client = None
 
 LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
 
@@ -101,7 +97,9 @@ def get_historical_performance(
             SELECT
                 ticker, direction, premium_score, realized_return_pct, exit_reason,
                 scan_date, entry_timestamp, exit_timestamp, policy_version
-            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+            FROM """
+            + FORWARD_PAPER_LEDGER
+            + """
             WHERE exit_timestamp IS NOT NULL
               AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL

@@ -7,16 +7,11 @@ from typing import Any
 
 from google.cloud import firestore
 
+from utils.data import DAILY_REPORTS_COLLECTION
+from utils.data import FS as db
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
-
-# Initialize client
-try:
-    db = firestore.Client(project="profitscout-fida8")
-except Exception as e:
-    logger.error(f"Failed to initialize Firestore client: {e}")
-    db = None
 
 
 def get_daily_report(date: str | None = None) -> dict[str, Any]:
@@ -33,7 +28,7 @@ def get_daily_report(date: str | None = None) -> dict[str, Any]:
         return {"error": "Firestore client not initialized"}
 
     try:
-        reports_ref = db.collection("daily_reports")
+        reports_ref = db.collection(DAILY_REPORTS_COLLECTION)
 
         if date:
             query = reports_ref.where("scan_date", "==", date).limit(1)
@@ -71,7 +66,7 @@ def get_report_list(limit: int = 10) -> list[dict[str, Any]]:
     limit = clamp(limit, 1, 30, default=10)
 
     try:
-        reports_ref = db.collection("daily_reports")
+        reports_ref = db.collection(DAILY_REPORTS_COLLECTION)
         # Over-fetch, then dedupe titles keeping the most recent occurrence.
         query = reports_ref.order_by("scan_date", direction=firestore.Query.DESCENDING).limit(
             min(limit * 3, 90)

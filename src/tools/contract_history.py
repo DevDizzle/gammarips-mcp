@@ -28,6 +28,8 @@ from zoneinfo import ZoneInfo
 import requests
 from google.cloud import bigquery
 
+from utils.data import BQ as _bq
+from utils.data import MINUTE_PATHS_TABLE as _MINUTE_PATHS_TABLE
 from utils.safety import GlobalToolBucket, safe_error
 
 logger = logging.getLogger(__name__)
@@ -49,18 +51,6 @@ _BOUNDARY_NOTE = (
     "does not simulate or validate exits. Paper-trade research data; not "
     "investment advice."
 )
-
-# Minute-path companion table (engine must-fix #6g, backfilled 2026-07-07):
-# per-minute bars over each pool candidate's 3-trading-day excursion window.
-# replay_contract serves it CACHE-FIRST; upstream is the fallback for
-# anything outside pool history.
-_MINUTE_PATHS_TABLE = "`profitscout-fida8.profit_scout.option_minute_paths`"
-
-try:
-    _bq = bigquery.Client(project="profitscout-fida8")
-except Exception as e:  # noqa: BLE001
-    logger.error(f"contract_history: BigQuery client init failed: {e}")
-    _bq = None
 
 
 def _ms_to_et_iso(ms) -> str | None:

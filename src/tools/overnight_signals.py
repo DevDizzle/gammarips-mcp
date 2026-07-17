@@ -18,18 +18,12 @@ from typing import Any
 
 from google.cloud import bigquery
 
+from utils.data import BQ as client
+from utils.data import RAW_SCAN_TABLE as _RAW_SCAN
+from utils.data import SAFE_ENRICHED_TABLE as _SAFE_ENRICHED
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
-
-try:
-    client = bigquery.Client(project="profitscout-fida8")
-except Exception as e:
-    logger.error(f"Failed to initialize BigQuery client: {e}")
-    client = None
-
-_SAFE_ENRICHED = "`profitscout-fida8.profit_scout.overnight_signals_enriched_safe`"
-_RAW_SCAN = "`profitscout-fida8.profit_scout.overnight_signals`"
 
 # TF-02: the safe view carries long narrative columns (thesis, news_summary,
 # flow_intent_reasoning, technicals) — full rows for the whole pool exceed the

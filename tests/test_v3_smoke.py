@@ -1,6 +1,8 @@
 """
-V3 surface smoke test — calls every registered tool against live data and
-asserts the leakage guarantees. Runnable directly:
+V4 surface smoke test — calls every registered tool (the 9 consolidated V4
+handlers) against live data and asserts the leakage guarantees. The absorbed
+V3 tools are exercised through their v4 view=/granularity= modes. Runnable
+directly:
 
     PYTHONPATH=src .venv/bin/python tests/test_v3_smoke.py
 
@@ -107,6 +109,27 @@ def _fail(name: str, msg: str):
     raise AssertionError(f"{name}: {msg}")
 
 
+# The three upstream-vendor checks (Polygon live fetch, FMP earnings) need a
+# mounted market-data secret. Absent one (e.g. a CI runner with BQ-only ADC),
+# they must SKIP, not FAIL — the credential gap is an environment fact, not a
+# logic regression. This matcher is deliberately narrow (credential/auth/quota
+# signatures only) so a real break still surfaces as a FAIL.
+def _is_credential_gap(out) -> bool:
+    if not isinstance(out, dict):
+        return False
+    err = str(out.get("error", "")).lower()
+    return any(
+        s in err
+        for s in (
+            "credential not configured",
+            "unauthorized",
+            "401",
+            "rate/daily limit",
+            "quota",
+        )
+    )
+
+
 def _ok(result, name: str):
     if isinstance(result, dict) and result.get("error"):
         _fail(name, f"tool returned error: {result['error']}")
@@ -123,41 +146,29 @@ def _ok(result, name: str):
 def run_all() -> list[tuple[str, str]]:
     sys.path.insert(0, "src")
 
-    from tools.contract_history import get_contract_marks, replay_contract
-    from tools.earnings import get_earnings_window
-    from tools.education import get_market_calendar_status, get_signal_explainer
-    from tools.historical import get_historical_performance
-    from tools.market_snapshot import get_contract_snapshot, get_pool_liquidity
-    from tools.metadata import get_available_dates, get_enriched_signal_schema
-    from tools.overnight_signals import (
-        get_enriched_signals,
-        get_freemium_preview,
-        get_overnight_signals,
-        get_signal_detail,
-    )
-    from tools.performance_tracker import (
-        get_position_history,
-        get_signal_performance,
-        get_win_rate_summary,
-    )
-    from tools.playbooks import get_playbook, list_playbooks
-    from tools.reports import get_daily_report, get_report_list
-    from tools.substrate import (
-        estimate_exit_rule,
-        get_harvest_curve,
-        get_opportunity_surface,
-        get_outcome_summary,
-        get_pool_features,
+    # V4 surface: the 9 consolidated handlers. Absorbed V3 tools are reached
+    # through their view=/granularity= modes.
+    from tools.v4 import (
+        get_daily_report,
+        get_liquidity,
+        get_market_calendar_status,
+        get_playbook,
+        get_pool,
         get_regime_context,
+        get_signal,
         query_outcomes,
+        replay_contract,
     )
 
     results: list[tuple[str, str]] = []
     historical_date = (date.today() - timedelta(days=14)).isoformat()
 
-    def check(name, fn, verify=None, expect_error=False):
+    def check(name, fn, verify=None, expect_error=False, credential_optional=False):
         try:
             out = fn()
+            if credential_optional and _is_credential_gap(out):
+                results.append((name, "SKIP (no market-data credential in this env)"))
+                return
             if not expect_error:
                 out = _ok(out, name)
             note = verify(out) if verify else ""
@@ -167,175 +178,193 @@ def run_all() -> list[tuple[str, str]]:
         except Exception as e:  # noqa: BLE001
             results.append((name, f"FAIL {type(e).__name__}: {e}"))
 
-    # --- live pool -----------------------------------------------------
+    # --- get_pool: raw | enriched | features | preview ------------------
     check(
-        "get_overnight_signals",
-        lambda: get_overnight_signals(limit=5),
+        "get_pool[raw]",
+        lambda: get_pool(view="raw", limit=5),
         lambda r: f"({len(r)} rows)",
     )
 
     def _verify_enriched(rows):
         if not rows:
-            _fail("get_enriched_signals", "no rows")
+            _fail("get_pool[enriched]", "no rows")
         leaked = FORWARD_OUTCOME_COLS & set(rows[0].keys())
         if leaked:
-            _fail("get_enriched_signals", f"LEAK: forward-outcome cols {leaked}")
+            _fail("get_pool[enriched]", f"LEAK: forward-outcome cols {leaked}")
         return f"({len(rows)} rows, no forward-outcome cols)"
 
-    check("get_enriched_signals", lambda: get_enriched_signals(limit=5), _verify_enriched)
+    check("get_pool[enriched]", lambda: get_pool(limit=5), _verify_enriched)
 
     # historical-date leak check (the exact V2 leak: outcomes filled on old dates)
-    def _hist_enriched():
-        rows = get_enriched_signals(limit=3)
-        # walk back to a date that has data
-        dates = [d["scan_date"] for d in get_available_dates() if "scan_date" in d]
-        old = [d for d in dates if d <= historical_date]
-        target = old[0] if old else rows[0]["scan_date"]
-        return get_enriched_signals(scan_date=target, limit=3)
+    def _scan_dates():
+        return [
+            d["scan_date"]
+            for d in get_market_calendar_status(view="scan_dates")
+            if "scan_date" in d
+        ]
 
-    check("get_enriched_signals[historical]", _hist_enriched, _verify_enriched)
+    def _hist_enriched():
+        rows = get_pool(limit=3)
+        old = [d for d in _scan_dates() if d <= historical_date]
+        target = old[0] if old else rows[0]["scan_date"]
+        return get_pool(scan_date=target, limit=3)
+
+    check("get_pool[enriched,historical]", _hist_enriched, _verify_enriched)
 
     # full-row (summary=False) historical leak check — this is the SELECT *
     # path where the original V2 leak lived; the summary default no longer
     # exercises it, so it needs its own assertion (TF-02 review fix #3).
     def _hist_enriched_full():
-        dates = [d["scan_date"] for d in get_available_dates() if "scan_date" in d]
-        old = [d for d in dates if d <= historical_date]
+        old = [d for d in _scan_dates() if d <= historical_date]
         target = old[0] if old else None
-        return get_enriched_signals(scan_date=target, limit=3, summary=False)
+        return get_pool(scan_date=target, limit=3, summary=False)
 
     def _verify_enriched_full(rows):
         note = _verify_enriched(rows)
         if "is_tradeable" in rows[0]:
-            _fail("get_enriched_signals[full]", "TF-15 regression: is_tradeable served")
+            _fail("get_pool[enriched,full]", "TF-15 regression: is_tradeable served")
         return note.replace("no forward-outcome cols", "full rows, no leak, no is_tradeable")
 
-    check("get_enriched_signals[full,historical]", _hist_enriched_full, _verify_enriched_full)
+    check("get_pool[enriched,full,historical]", _hist_enriched_full, _verify_enriched_full)
 
     # fields projection must reject forward-outcome columns (they are absent
     # from the safe view; a request for one returns an error, never data).
     def _fields_reject():
-        out = get_enriched_signals(limit=3, fields=["next_day_pct", "is_win", "outcome_tier"])
+        out = get_pool(limit=3, fields=["next_day_pct", "is_win", "outcome_tier"])
         if not (out and isinstance(out[0], dict) and "error" in out[0]):
             _fail("fields-reject", f"forward-outcome fields not rejected: {out[:1]}")
         return out
 
     check(
-        "get_enriched_signals[fields-reject]",
+        "get_pool[enriched,fields-reject]",
         _fields_reject,
         lambda r: "(forward-outcome fields rejected)",
         expect_error=True,
     )
 
     def _detail():
-        rows = _ok(get_enriched_signals(limit=1), "detail-seed")
-        return get_signal_detail(rows[0]["ticker"], rows[0]["scan_date"][:10])
+        rows = _ok(get_pool(limit=1), "detail-seed")
+        return get_signal(ticker=rows[0]["ticker"], scan_date=rows[0]["scan_date"][:10])
 
     check(
-        "get_signal_detail",
+        "get_signal[detail]",
         _detail,
         lambda r: (
-            _fail("get_signal_detail", f"LEAK: {FORWARD_OUTCOME_COLS & set(r)}")
+            _fail("get_signal[detail]", f"LEAK: {FORWARD_OUTCOME_COLS & set(r)}")
             if FORWARD_OUTCOME_COLS & set(r)
             else f"({r.get('ticker')})"
         ),
     )
     check(
-        "get_freemium_preview", lambda: get_freemium_preview(limit=3), lambda r: f"({len(r)} rows)"
+        "get_pool[preview]", lambda: get_pool(view="preview", limit=3), lambda r: f"({len(r)} rows)"
     )
 
     # --- substrate ------------------------------------------------------
     def _verify_features(out):
         rows = out["rows"]
         if not rows:
-            _fail("get_pool_features", "no rows")
+            _fail("get_pool[features]", "no rows")
         bad = NON_FEATURE_COLS & set(rows[0].keys())
         if bad:
-            _fail("get_pool_features", f"LEAK: non-feature cols {bad}")
-        _assert_pick_flags_guarded(rows, "get_pool_features")
+            _fail("get_pool[features]", f"LEAK: non-feature cols {bad}")
+        _assert_pick_flags_guarded(rows, "get_pool[features]")
         return f"({out['row_count']} rows @ {out['scan_date']}, features only)"
 
-    check("get_pool_features", lambda: get_pool_features(limit=10), _verify_features)
+    check("get_pool[features]", lambda: get_pool(view="features", limit=10), _verify_features)
 
     def _verify_surface(out):
         rows = out["rows"]
         if not rows:
-            _fail("get_opportunity_surface", "no rows")
+            _fail("query_outcomes[surface]", "no rows")
         open_rows = [r for r in rows if r.get("opp_status") != "OK"]
         if open_rows:
-            _fail("get_opportunity_surface", f"{len(open_rows)} non-closed rows in default mode")
+            _fail("query_outcomes[surface]", f"{len(open_rows)} non-closed rows in default mode")
         return f"({out['row_count']} closed-window rows)"
 
-    check("get_opportunity_surface", lambda: get_opportunity_surface(days=30), _verify_surface)
+    check(
+        "query_outcomes[surface]",
+        lambda: query_outcomes(view="surface", days=30),
+        _verify_surface,
+    )
 
     def _verify_outcomes(out):
         rows = out["rows"]
         if not rows:
-            _fail("query_outcomes", "no rows")
+            _fail("query_outcomes[labels]", "no rows")
         if any(r.get("realized_return_pct") is None for r in rows):
-            _fail("query_outcomes", "NULL label row leaked through default filter")
+            _fail("query_outcomes[labels]", "NULL label row leaked through default filter")
         if any(r.get("illiquid_exit") for r in rows):
-            _fail("query_outcomes", "illiquid row leaked through default filter")
+            _fail("query_outcomes[labels]", "illiquid row leaked through default filter")
         if "realized_return_pct_3d" in rows[0]:
-            _fail("query_outcomes", "3d label mixed into same_day horizon")
+            _fail("query_outcomes[labels]", "3d label mixed into same_day horizon")
         for r in rows:
             if r.get("opp_status") != "OK" and (
                 r.get("opp_peak_return") is not None or r.get("opp_trough_return") is not None
             ):
-                _fail("query_outcomes", "open-window opp excursion leaked")
-        _assert_pick_flags_guarded(rows, "query_outcomes")
+                _fail("query_outcomes[labels]", "open-window opp excursion leaked")
+        _assert_pick_flags_guarded(rows, "query_outcomes[labels]")
         meta = out["meta"]
         return f"({out['row_count']} rows; excl null={meta['excluded_null_label']} illiq={meta['excluded_illiquid']})"
 
     check(
-        "query_outcomes[same_day]",
-        lambda: query_outcomes(horizon="same_day", delta_min=0.2, delta_max=0.46, limit=20),
+        "query_outcomes[labels,same_day]",
+        lambda: query_outcomes(
+            view="labels", horizon="same_day", delta_min=0.2, delta_max=0.46, limit=20
+        ),
         _verify_outcomes,
     )
     check(
-        "query_outcomes[3d]",
-        lambda: query_outcomes(horizon="3d", limit=10),
+        "query_outcomes[labels,3d]",
+        lambda: query_outcomes(view="labels", horizon="3d", limit=10),
         lambda out: (
-            _fail("query_outcomes[3d]", "same-day label mixed into 3d horizon")
+            _fail("query_outcomes[labels,3d]", "same-day label mixed into 3d horizon")
             if out["rows"] and "realized_return_pct" in out["rows"][0]
             else f"({out['row_count']} rows)"
         ),
     )
     check(
-        "get_outcome_summary",
-        lambda: get_outcome_summary(horizon="3d", group_by="delta_bucket"),
+        "query_outcomes[summary]",
+        lambda: query_outcomes(view="summary", horizon="3d", group_by="delta_bucket"),
         lambda out: f"({len(out['groups'])} groups; disclaimer={'disclaimer' in out['meta']})",
     )
     check(
-        "get_outcome_summary[bad-group]",
-        lambda: get_outcome_summary(group_by="ticker; DROP TABLE x"),
+        "query_outcomes[summary,bad-group]",
+        lambda: query_outcomes(view="summary", group_by="ticker; DROP TABLE x"),
         lambda out: (
             "(rejected non-whitelisted group_by)"
             if out.get("error")
-            else _fail("get_outcome_summary", "accepted non-whitelisted group_by!")
+            else _fail("query_outcomes[summary]", "accepted non-whitelisted group_by!")
         ),
         expect_error=True,
     )
 
     def _verify_exit(out):
         if out.get("n_classified", 0) <= 0:
-            _fail("estimate_exit_rule", "no classified rows")
+            _fail("query_outcomes[exit_rule]", "no classified rows")
         buckets = set(out["buckets"].keys())
         if "AMBIGUOUS" in buckets:
-            _fail("estimate_exit_rule", "AMBIGUOUS bucket present — should be resolved+tagged")
+            _fail(
+                "query_outcomes[exit_rule]", "AMBIGUOUS bucket present — should be resolved+tagged"
+            )
         return (
             f"(n={out['n_classified']}, wr~{out['est_win_rate']}, "
             f"heuristic={out['heuristic_share']}, ev=[{out['ev_bounds']['low']},{out['ev_bounds']['high']}])"
         )
 
-    check("estimate_exit_rule", lambda: estimate_exit_rule(40, -30, horizon="3d"), _verify_exit)
     check(
-        "estimate_exit_rule[exact-3d]",
-        lambda: estimate_exit_rule(80, 60, horizon="3d"),
+        "query_outcomes[exit_rule]",
+        lambda: query_outcomes(view="exit_rule", target_pct=40, stop_pct=-30, horizon="3d"),
+        _verify_exit,
+    )
+    check(
+        "query_outcomes[exit_rule,exact-3d]",
+        lambda: query_outcomes(view="exit_rule", target_pct=80, stop_pct=60, horizon="3d"),
         lambda out: (
             f"(exact n={out['exact_label_match']['n']}, wr={out['exact_label_match']['win_rate']})"
             if out.get("exact_label_match")
-            else _fail("estimate_exit_rule", "exact 3d rule did not return exact_label_match")
+            else _fail(
+                "query_outcomes[exit_rule]", "exact 3d rule did not return exact_label_match"
+            )
         ),
     )
     check(
@@ -352,66 +381,66 @@ def run_all() -> list[tuple[str, str]]:
     def _verify_harvest(r):
         ps = [t["p_touch"] for t in r["targets"]]
         if ps != sorted(ps, reverse=True):
-            _fail("get_harvest_curve", f"p_touch not monotone in target: {ps}")
+            _fail("query_outcomes[harvest]", f"p_touch not monotone in target: {ps}")
         if not all(0.0 <= p <= 1.0 for p in ps):
-            _fail("get_harvest_curve", "p_touch out of [0,1]")
+            _fail("query_outcomes[harvest]", "p_touch out of [0,1]")
         if "rows" in r:
-            _fail("get_harvest_curve", "row-level data leaked from an aggregate tool")
+            _fail("query_outcomes[harvest]", "row-level data leaked from an aggregate tool")
         return f"(n={r['n']}, p20={r['targets'][1]['p_touch']}, aggregates only)"
 
     check(
-        "get_harvest_curve",
-        lambda: get_harvest_curve(targets=[15, 20, 50, 100]),
+        "query_outcomes[harvest]",
+        lambda: query_outcomes(view="harvest", targets=[15, 20, 50, 100]),
         _verify_harvest,
     )
     check(
-        "get_outcome_summary[moneyness]",
-        lambda: get_outcome_summary(horizon="3d", group_by="moneyness_bucket"),
+        "query_outcomes[summary,moneyness]",
+        lambda: query_outcomes(view="summary", horizon="3d", group_by="moneyness_bucket"),
         lambda r: (
             f"({len(r['groups'])} moneyness buckets)"
             if r.get("groups")
-            else _fail("get_outcome_summary", "moneyness_bucket returned no groups")
+            else _fail("query_outcomes[summary]", "moneyness_bucket returned no groups")
         ),
     )
     check(
-        "query_outcomes[aggregate_only]",
-        lambda: query_outcomes(horizon="3d", aggregate_only=True),
+        "query_outcomes[labels,aggregate_only]",
+        lambda: query_outcomes(view="labels", horizon="3d", aggregate_only=True),
         lambda r: (
             f"(agg n={r['aggregate'].get('n')}, no rows key={'rows' not in r})"
             if r.get("aggregate") and "rows" not in r
-            else _fail("query_outcomes", "aggregate_only returned rows or no aggregate")
+            else _fail("query_outcomes[labels]", "aggregate_only returned rows or no aggregate")
         ),
     )
     check(
-        "get_pool_features[empty-date]",
-        lambda: get_pool_features(scan_date="2020-01-02"),
+        "get_pool[features,empty-date]",
+        lambda: get_pool(view="features", scan_date="2020-01-02"),
         lambda r: (
             "(0 rows + latest_labeled pointer)"
             if r.get("row_count") == 0 and r.get("latest_labeled_scan_date")
-            else _fail("get_pool_features", "TF-06: empty date lacks latest_labeled pointer")
+            else _fail("get_pool[features]", "TF-06: empty date lacks latest_labeled pointer")
         ),
     )
     check(
-        "get_signal_detail[not-in-pool]",
-        lambda: get_signal_detail("ZZZZZZ"),
+        "get_signal[detail,not-in-pool]",
+        lambda: get_signal(ticker="ZZZZZZ"),
         lambda r: (
             "(friendly not-in-pool error)"
             if r.get("error") and r.get("note")
-            else _fail("get_signal_detail", "Q3: no friendly not-in-pool message")
+            else _fail("get_signal[detail]", "Q3: no friendly not-in-pool message")
         ),
         expect_error=True,
     )
 
     def _snapshot_check():
-        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
-        return get_contract_snapshot(rows[0]["recommended_contract"])
+        rows = _ok(get_pool(limit=1), "snapshot-seed")
+        return get_liquidity(contract=rows[0]["recommended_contract"])
 
     check(
-        "get_contract_snapshot",
+        "get_liquidity[contract]",
         _snapshot_check,
         lambda r: (
             _fail(
-                "get_contract_snapshot",
+                "get_liquidity[contract]",
                 f"quote field leaked: {set(r) & {'bid', 'ask', 'spread_pct', 'mid'}}",
             )
             if set(r) & {"bid", "ask", "spread_pct", "mid"}
@@ -419,12 +448,12 @@ def run_all() -> list[tuple[str, str]]:
         ),
     )
     check(
-        "get_contract_snapshot[bad-input]",
-        lambda: get_contract_snapshot("'; DROP TABLE--"),
+        "get_liquidity[contract,bad-input]",
+        lambda: get_liquidity(contract="'; DROP TABLE--"),
         lambda r: (
             "(rejected malformed contract)"
             if r.get("error")
-            else _fail("get_contract_snapshot", "malformed contract accepted!")
+            else _fail("get_liquidity[contract]", "malformed contract accepted!")
         ),
         expect_error=True,
     )
@@ -433,18 +462,18 @@ def run_all() -> list[tuple[str, str]]:
     _P1_PROVENANCE = {"pool_liquidity_cache", "pool_liquidity_cache_stale", "upstream_live"}
 
     def _snapshot_p1_check():
-        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
-        return get_contract_snapshot(rows[0]["recommended_contract"])
+        rows = _ok(get_pool(limit=1), "snapshot-seed")
+        return get_liquidity(contract=rows[0]["recommended_contract"])
 
     check(
-        "get_contract_snapshot[provenance+TF-18]",
+        "get_liquidity[contract,provenance+TF-18]",
         _snapshot_p1_check,
         lambda r: (
             f"(from={r.get('retrieved_from')}, und_px={r.get('underlying_price')} "
             f"[{r.get('underlying_price_source')}])"
             if r.get("retrieved_from") in _P1_PROVENANCE and r.get("underlying_price")
             else _fail(
-                "get_contract_snapshot",
+                "get_liquidity[contract]",
                 f"P1 regression: retrieved_from={r.get('retrieved_from')}, "
                 f"underlying_price={r.get('underlying_price')}",
             )
@@ -452,19 +481,20 @@ def run_all() -> list[tuple[str, str]]:
     )
 
     def _snapshot_live_check():
-        rows = _ok(get_enriched_signals(limit=1), "snapshot-seed")
-        return get_contract_snapshot(rows[0]["recommended_contract"], live=True)
+        rows = _ok(get_pool(limit=1), "snapshot-seed")
+        return get_liquidity(contract=rows[0]["recommended_contract"], live=True)
 
     check(
-        "get_contract_snapshot[live=true]",
+        "get_liquidity[contract,live=true]",
         _snapshot_live_check,
         lambda r: (
             f"(upstream_live, as_of={str(r.get('as_of'))[:16]})"
             if r.get("retrieved_from") == "upstream_live"
             else _fail(
-                "get_contract_snapshot", f"live=true not upstream: {r.get('retrieved_from')}"
+                "get_liquidity[contract]", f"live=true not upstream: {r.get('retrieved_from')}"
             )
         ),
+        credential_optional=True,
     )
 
     def _pool_liquidity_verify(r):
@@ -473,27 +503,27 @@ def run_all() -> list[tuple[str, str]]:
             return (
                 "(0 rows + note)"
                 if r.get("note")
-                else _fail("get_pool_liquidity", "empty without note")
+                else _fail("get_liquidity[pool]", "empty without note")
             )
         leaked = [row for row in r["rows"] if set(row) & {"bid", "ask", "spread_pct", "mid"}]
         if leaked:
-            _fail("get_pool_liquidity", f"NULL quote fields leaked on {len(leaked)} rows")
+            _fail("get_liquidity[pool]", f"NULL quote fields leaked on {len(leaked)} rows")
         missing_asof = [row for row in r["rows"] if not row.get("as_of")]
         if missing_asof:
-            _fail("get_pool_liquidity", f"{len(missing_asof)} rows missing as_of provenance")
+            _fail("get_liquidity[pool]", f"{len(missing_asof)} rows missing as_of provenance")
         return f"({r['count']} rows, scan_date={r.get('scan_date')}, freshest={str(r.get('freshest_as_of'))[:16]})"
 
-    check("get_pool_liquidity", get_pool_liquidity, _pool_liquidity_verify)
+    check("get_liquidity[pool]", get_liquidity, _pool_liquidity_verify)
 
     def _pool_liquidity_shortlist():
-        pool = _ok(get_pool_liquidity(), "pool-liq-seed")
+        pool = _ok(get_liquidity(), "pool-liq-seed")
         if not pool.get("rows"):
             return {"skipped": True, "note": "no snapshots yet today"}
         shortlist = [row["contract"] for row in pool["rows"][:3]]
-        return get_pool_liquidity(contracts=shortlist)
+        return get_liquidity(contracts=shortlist)
 
     check(
-        "get_pool_liquidity[shortlist]",
+        "get_liquidity[pool,shortlist]",
         _pool_liquidity_shortlist,
         lambda r: (
             "(skipped: no snapshots)"
@@ -501,104 +531,109 @@ def run_all() -> list[tuple[str, str]]:
             else (
                 f"({r['count']} rows in one call)"
                 if 0 < r.get("count", 0) <= 3
-                else _fail("get_pool_liquidity", f"shortlist returned {r.get('count')}")
+                else _fail("get_liquidity[pool]", f"shortlist returned {r.get('count')}")
             )
         ),
     )
     check(
-        "get_pool_liquidity[bad-contract]",
-        lambda: get_pool_liquidity(contracts=["'; DROP TABLE--"]),
+        "get_liquidity[pool,bad-contract]",
+        lambda: get_liquidity(contracts=["'; DROP TABLE--"]),
         lambda r: (
             "(rejected malformed contract)"
             if r.get("error")
-            else _fail("get_pool_liquidity", "malformed contract accepted!")
+            else _fail("get_liquidity[pool]", "malformed contract accepted!")
         ),
         expect_error=True,
     )
 
-    # --- RM-003 (2026-07-07): earnings window -------------------------------
+    # --- RM-003 (2026-07-07): earnings window (get_signal view=earnings) -----
     def _earnings_check():
-        rows = _ok(get_enriched_signals(limit=1), "earnings-seed")
-        return get_earnings_window(contract=rows[0]["recommended_contract"])
+        rows = _ok(get_pool(limit=1), "earnings-seed")
+        return get_signal(view="earnings", contract=rows[0]["recommended_contract"])
 
     def _verify_earnings(r):
         if r.get("earnings_in_window") is None:
             # unknown is legitimate ONLY with the explicit fail-closed guidance
             blob = (str(r.get("note", "")) + str(r.get("error", ""))).lower()
             if "in-window" not in blob:
-                _fail("get_earnings_window", "unknown date without fail-closed note")
+                _fail("get_signal[earnings]", "unknown date without fail-closed note")
             return f"(unknown -> fail-closed noted, ticker={r.get('ticker')})"
         if not r.get("expiration") or not r.get("next_earnings_date"):
-            _fail("get_earnings_window", "resolved window missing expiration/date")
+            _fail("get_signal[earnings]", "resolved window missing expiration/date")
         return (
             f"({r['ticker']}: next={r['next_earnings_date']} exp={r['expiration']} "
             f"in_window={r['earnings_in_window']})"
         )
 
-    check("get_earnings_window[contract]", _earnings_check, _verify_earnings)
     check(
-        "get_earnings_window[bad-ticker]",
-        lambda: get_earnings_window(ticker="'; DROP--"),
+        "get_signal[earnings,contract]", _earnings_check, _verify_earnings, credential_optional=True
+    )
+    check(
+        "get_signal[earnings,bad-ticker]",
+        lambda: get_signal(view="earnings", ticker="'; DROP--"),
         lambda r: (
             "(rejected malformed ticker)"
             if r.get("error")
-            else _fail("get_earnings_window", "malformed ticker accepted!")
+            else _fail("get_signal[earnings]", "malformed ticker accepted!")
         ),
         expect_error=True,
     )
 
-    # --- RM-004 data (2026-07-07): daily mark series -------------------------
+    # --- RM-004 data (2026-07-07): daily marks (replay_contract gran=day) ----
     def _marks_check():
-        rows = _ok(get_enriched_signals(limit=1), "marks-seed")
-        return get_contract_marks(rows[0]["recommended_contract"])
+        rows = _ok(get_pool(limit=1), "marks-seed")
+        return replay_contract(rows[0]["recommended_contract"], granularity="day")
 
     def _verify_marks(r):
         if r.get("bar_count", 0) < 1:
             # a brand-new contract can be legitimately bar-less — but only with
             # the honest empty-window note
             if "No bars" not in str(r.get("note", "")):
-                _fail("get_contract_marks", "empty series without honest note")
+                _fail("replay_contract[day]", "empty series without honest note")
             return "(0 bars + honest note)"
         b = r["bars"][0]
         for k in ("date", "close"):
             if b.get(k) is None:
-                _fail("get_contract_marks", f"bar missing {k}")
+                _fail("replay_contract[day]", f"bar missing {k}")
         if "exit" in str(r.get("note", "")).lower() and "not simulate" not in str(
             r.get("note", "")
         ):
-            _fail("get_contract_marks", "boundary note drifted")
+            _fail("replay_contract[day]", "boundary note drifted")
         return f"({r['bar_count']} daily bars {r['from_date']}..{r['to_date']})"
 
-    check("get_contract_marks", _marks_check, _verify_marks)
+    check("replay_contract[day]", _marks_check, _verify_marks, credential_optional=True)
     check(
-        "get_contract_marks[bad-input]",
-        lambda: get_contract_marks("SPY"),
+        "replay_contract[day,bad-input]",
+        lambda: replay_contract("SPY", granularity="day"),
         lambda r: (
             "(rejected non-OCC ticker)"
             if r.get("error")
-            else _fail("get_contract_marks", "non-OCC ticker accepted!")
+            else _fail("replay_contract[day]", "non-OCC ticker accepted!")
         ),
         expect_error=True,
     )
     check(
-        "get_contract_marks[bad-date]",
-        lambda: get_contract_marks("O:AAPL260717C00315000", from_date="2026-02-30"),
+        "replay_contract[day,bad-date]",
+        lambda: replay_contract("O:AAPL260717C00315000", granularity="day", from_date="2026-02-30"),
         lambda r: (
             "(rejected impossible date)"
             if r.get("error") and "real" in r["error"]
-            else _fail("get_contract_marks", "impossible date accepted/raised")
+            else _fail("replay_contract[day]", "impossible date accepted/raised")
         ),
         expect_error=True,
     )
     check(
-        "get_contract_marks[span-cap]",
-        lambda: get_contract_marks(
-            "O:AAPL260717C00315000", from_date="2025-01-01", to_date="2026-07-01"
+        "replay_contract[day,span-cap]",
+        lambda: replay_contract(
+            "O:AAPL260717C00315000",
+            granularity="day",
+            from_date="2025-01-01",
+            to_date="2026-07-01",
         ),
         lambda r: (
             "(rejected over-cap span)"
             if r.get("error") and "capped" in r["error"]
-            else _fail("get_contract_marks", "over-cap span accepted!")
+            else _fail("replay_contract[day]", "over-cap span accepted!")
         ),
         expect_error=True,
     )
@@ -606,11 +641,11 @@ def run_all() -> list[tuple[str, str]]:
     # --- RM-002 + TF-14 (2026-07-07): minute replay + trailing scoring -------
     def _replay_check():
         # seed from the labeled substrate so the minute-path table has the row
-        feats = _ok(get_pool_features(limit=1), "replay-seed")
+        feats = _ok(get_pool(view="features", limit=1), "replay-seed")
         row = feats["rows"][0] if isinstance(feats, dict) else feats[0]
         return replay_contract(
             row["recommended_contract"],
-            str(row["entry_day"])[:10],
+            date=str(row["entry_day"])[:10],
             target_pct=40,
             stop_pct=30,
         )
@@ -620,106 +655,110 @@ def run_all() -> list[tuple[str, str]]:
             return (
                 "(0 bars + honest note)"
                 if "No bars" in str(r.get("note", ""))
-                else _fail("replay_contract", "empty replay without honest note")
+                else _fail("replay_contract[minute]", "empty replay without honest note")
             )
         if not r.get("anchor") or not r["anchor"].get("price"):
-            _fail("replay_contract", "missing 10:00 ET anchor")
+            _fail("replay_contract[minute]", "missing 10:00 ET anchor")
         fc = r.get("first_crossing") or {}
         if fc.get("first") not in ("TARGET", "STOP", "AMBIGUOUS_SAME_BAR", "NONE"):
-            _fail("replay_contract", f"bad first_crossing verdict: {fc.get('first')}")
+            _fail("replay_contract[minute]", f"bad first_crossing verdict: {fc.get('first')}")
         return (
             f"({r['bar_count']} bars from {r['retrieved_from']}, first_crossing={fc.get('first')})"
         )
 
-    check("replay_contract", _replay_check, _verify_replay)
+    check("replay_contract[minute]", _replay_check, _verify_replay)
     check(
-        "replay_contract[bad-date]",
-        lambda: replay_contract("O:AAPL260717C00315000", "2026-02-30"),
+        "replay_contract[minute,bad-date]",
+        lambda: replay_contract("O:AAPL260717C00315000", date="2026-02-30"),
         lambda r: (
             "(rejected impossible date)"
             if r.get("error")
-            else _fail("replay_contract", "impossible date accepted")
+            else _fail("replay_contract[minute]", "impossible date accepted")
         ),
         expect_error=True,
     )
 
     def _verify_trailing(r):
         if r.get("n_scored", 0) < 100:
-            _fail("estimate_exit_rule[trailing]", f"n_scored={r.get('n_scored')}")
+            _fail("query_outcomes[exit_rule,trailing]", f"n_scored={r.get('n_scored')}")
         if r.get("params", {}).get("rule") != "trailing":
-            _fail("estimate_exit_rule[trailing]", "params.rule missing")
+            _fail("query_outcomes[exit_rule,trailing]", "params.rule missing")
         if "not exit advice" not in str(r.get("meta", {}).get("research_only", "")):
-            _fail("estimate_exit_rule[trailing]", "research-only framing missing")
+            _fail("query_outcomes[exit_rule,trailing]", "research-only framing missing")
         return (
             f"(n={r['n_scored']}, wr={r['est_win_rate']}, avg={r['avg_return']}, "
             f"stop_share={r['stop_share']})"
         )
 
     check(
-        "estimate_exit_rule[trailing]",
-        lambda: estimate_exit_rule(stop_pct=30, rule="trailing", trail_pct=25, activation_pct=20),
+        "query_outcomes[exit_rule,trailing]",
+        lambda: query_outcomes(
+            view="exit_rule", stop_pct=30, rule="trailing", trail_pct=25, activation_pct=20
+        ),
         _verify_trailing,
     )
     check(
-        "estimate_exit_rule[exact-crossing]",
-        lambda: estimate_exit_rule(target_pct=40, stop_pct=30),
+        "query_outcomes[exit_rule,exact-crossing]",
+        lambda: query_outcomes(view="exit_rule", target_pct=40, stop_pct=30),
         lambda r: (
             f"(heuristic_share={r['heuristic_share']}, exact={r['exact_resolution']['resolved_by_minute_tape']})"
             if r.get("heuristic_share", 1) <= 0.02 and r.get("exact_resolution")
             else _fail(
-                "estimate_exit_rule",
+                "query_outcomes[exit_rule]",
                 f"TF-14 regression: heuristic_share={r.get('heuristic_share')}",
             )
         ),
     )
     check(
-        "estimate_exit_rule[trailing-missing-param]",
-        lambda: estimate_exit_rule(rule="trailing"),
+        "query_outcomes[exit_rule,trailing-missing-param]",
+        lambda: query_outcomes(view="exit_rule", rule="trailing"),
         lambda r: (
             "(rejected missing trail_pct)"
             if r.get("error")
-            else _fail("estimate_exit_rule", "trailing without trail_pct accepted")
+            else _fail("query_outcomes[exit_rule]", "trailing without trail_pct accepted")
         ),
         expect_error=True,
     )
 
-    # --- playbooks --------------------------------------------------------
+    # --- playbooks (get_playbook: list | name | field | schema) ------------
     check(
-        "list_playbooks",
-        list_playbooks,
+        "get_playbook[list]",
+        get_playbook,
         lambda r: (
-            f"({len(r)} playbooks)" if len(r) >= 6 else _fail("list_playbooks", f"only {len(r)}")
+            f"({len(r['playbooks'])} playbooks)"
+            if len(r.get("playbooks", [])) >= 6
+            else _fail("get_playbook[list]", f"only {len(r.get('playbooks', []))}")
         ),
     )
     check(
-        "get_playbook",
-        lambda: get_playbook("start-here"),
+        "get_playbook[name]",
+        lambda: get_playbook(name="start-here"),
         lambda r: f"({r['title'][:30]}...)",
     )
     check(
-        "get_playbook[traversal]",
-        lambda: get_playbook("../../pyproject"),
+        "get_playbook[name,traversal]",
+        lambda: get_playbook(name="../../pyproject"),
         lambda r: (
             "(rejected bad name)"
             if r.get("error")
-            else _fail("get_playbook", "path traversal accepted!")
+            else _fail("get_playbook[name]", "path traversal accepted!")
         ),
         expect_error=True,
     )
 
-    # --- performance / receipts -------------------------------------------
+    # --- performance / receipts (query_outcomes receipts views) ------------
     check(
-        "get_signal_performance",
-        lambda: get_signal_performance(limit=5),
+        "query_outcomes[signal_performance]",
+        lambda: query_outcomes(view="signal_performance", limit=5),
         lambda r: (
             f"({r['row_count']} rows, universe={r['universe']})"
             if r.get("universe") == "underlying_direction"
-            else _fail("get_signal_performance", "missing universe marker")
+            else _fail("query_outcomes[signal_performance]", "missing universe marker")
         ),
     )
     check(
-        "get_win_rate_summary",
-        lambda: get_win_rate_summary(days=30),
+        "query_outcomes[win_rate]",
+        lambda: query_outcomes(view="win_rate", days=30),
         lambda r: f"(wr={r.get('underlying_direction_win_rate')}%, universe={r.get('universe')})",
     )
 
@@ -727,50 +766,66 @@ def run_all() -> list[tuple[str, str]]:
         today = date.today().isoformat()
         for r in out["rows"]:
             if r["exit_timestamp"][:10] >= today:
-                _fail("get_position_history", f"non-realized row leaked: {r['exit_timestamp']}")
+                _fail(
+                    "query_outcomes[positions]", f"non-realized row leaked: {r['exit_timestamp']}"
+                )
             if r["policy_version"] != "V7_1_TILTED_GIGO":
-                _fail("get_position_history", f"cohort mix: {r['policy_version']}")
+                _fail("query_outcomes[positions]", f"cohort mix: {r['policy_version']}")
         if "skip_days" not in out:
-            _fail("get_position_history", "skip_days missing from response")
+            _fail("query_outcomes[positions]", "skip_days missing from response")
         return (
             f"({out['row_count']} realized rows, {len(out['skip_days'])} skip days, cohort clean)"
         )
 
-    check("get_position_history", lambda: get_position_history(days=30), _verify_positions)
     check(
-        "get_historical_performance",
-        lambda: get_historical_performance(lookback_days=30),
+        "query_outcomes[positions]",
+        lambda: query_outcomes(view="positions", days=30),
+        _verify_positions,
+    )
+    check(
+        "query_outcomes[performance]",
+        lambda: query_outcomes(view="performance", days=30),
         lambda r: f"(n={r['total_trades']} wr={r['win_rate']})",
     )
 
     # --- reports & metadata ------------------------------------------------
-    check("get_daily_report", get_daily_report, lambda r: f"({str(r.get('title'))[:30]}...)")
-    check("get_report_list", lambda: get_report_list(limit=3), lambda r: f"({len(r)} reports)")
-    check("get_available_dates", get_available_dates, lambda r: f"({len(r)} dates)")
+    check(
+        "get_daily_report[report]", get_daily_report, lambda r: f"({str(r.get('title'))[:30]}...)"
+    )
+    check(
+        "get_daily_report[list]",
+        lambda: get_daily_report(view="list", limit=3),
+        lambda r: f"({len(r)} reports)",
+    )
+    check(
+        "get_market_calendar_status[scan_dates]",
+        lambda: get_market_calendar_status(view="scan_dates"),
+        lambda r: f"({len(r)} dates)",
+    )
 
     def _verify_schema(out):
         classes = {c["classification"] for c in out["columns"]}
         expected = {"feature", "label", "opportunity", "regime_telemetry", "identity"}
         if not expected.issubset(classes):
-            _fail("get_enriched_signal_schema", f"missing classifications: {expected - classes}")
+            _fail("get_playbook[schema]", f"missing classifications: {expected - classes}")
         untagged = [c["column"] for c in out["columns"] if c["classification"] == "untagged"]
         return f"({len(out['columns'])} cols, {len(out['features_view_columns'])} in view, untagged={len(untagged)})"
 
-    check("get_enriched_signal_schema", get_enriched_signal_schema, _verify_schema)
+    check("get_playbook[schema]", lambda: get_playbook(name="schema"), _verify_schema)
 
     # --- reference -----------------------------------------------------------
     check(
-        "get_market_calendar_status",
+        "get_market_calendar_status[status]",
         get_market_calendar_status,
-        lambda r: f"(open={r.get('is_open_now')})",
+        lambda r: f"(open={r.get('is_open_today')})",
     )
     check(
-        "get_signal_explainer",
-        lambda: get_signal_explainer("mom_60"),
+        "get_playbook[field]",
+        lambda: get_playbook(field="mom_60"),
         lambda r: (
             "(mom_60 explained)"
             if r.get("definition") and "momentum" in r["definition"].lower()
-            else _fail("get_signal_explainer", "mom_60 not explained")
+            else _fail("get_playbook[field]", "mom_60 not explained")
         ),
     )
 
@@ -786,10 +841,12 @@ def test_v3_surface():
 if __name__ == "__main__":
     results = run_all()
     width = max(len(n) for n, _ in results)
-    fails = 0
+    fails = skips = 0
     for name, status in results:
         print(f"{name:<{width}}  {status}")
-        if status.startswith("FAIL"):
-            fails += 1
-    print(f"\n{len(results) - fails}/{len(results)} passed")
+        fails += status.startswith("FAIL")
+        skips += status.startswith("SKIP")
+    print(
+        f"\n{len(results) - fails - skips}/{len(results)} passed, {skips} skipped, {fails} failed"
+    )
     sys.exit(1 if fails else 0)

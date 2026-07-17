@@ -33,25 +33,16 @@ from zoneinfo import ZoneInfo
 
 from google.cloud import bigquery
 
+from utils.data import BQ as client
+from utils.data import FEATURES_VIEW as _FEATURES_VIEW
+from utils.data import MINUTE_PATHS_TABLE as _MINUTE_PATHS_TABLE
+from utils.data import OUTCOMES_TABLE as _OUTCOMES_TABLE
 from utils.safety import MAX_RESPONSE_ROWS, clamp, safe_error
 
 logger = logging.getLogger(__name__)
 
 _ET_TZ = ZoneInfo("America/New_York")
 _ONE_DAY = _timedelta(days=1)
-
-try:
-    client = bigquery.Client(project="profitscout-fida8")
-except Exception as e:  # noqa: BLE001
-    logger.error(f"Failed to initialize BigQuery client: {e}")
-    client = None
-
-_FEATURES_VIEW = "`profitscout-fida8.profit_scout.enriched_features_v1`"
-_OUTCOMES_TABLE = "`profitscout-fida8.profit_scout.enriched_option_outcomes`"
-# Minute-path companion table (engine must-fix #6g, backfilled 2026-07-07):
-# per-minute bars over each candidate's 3-trading-day excursion window.
-# Powers EXACT first-crossing resolution + trailing-rule scoring (TF-14).
-_MINUTE_PATHS_TABLE = "`profitscout-fida8.profit_scout.option_minute_paths`"
 
 # Same-day GIGO bracket (V7.1 live policy) and the legacy 3-day companion
 # bracket, in FRACTION units as stored in the label-semantics columns.

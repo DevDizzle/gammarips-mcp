@@ -21,16 +21,11 @@ from typing import Any
 
 from google.cloud import bigquery
 
+from utils.data import BQ as client
+from utils.data import FORWARD_PAPER_LEDGER, SIGNAL_PERFORMANCE_TABLE
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
-
-# Initialize client
-try:
-    client = bigquery.Client(project="profitscout-fida8")
-except Exception as e:
-    logger.error(f"Failed to initialize BigQuery client: {e}")
-    client = None
 
 # The live paper-cohort policy label. Earlier cohorts used different exit
 # mechanics — mixing them in one aggregate produces nonsense.
@@ -79,11 +74,11 @@ def get_signal_performance(
 
     try:
         # scan_date is STRING in this table
-        base_query = """
+        base_query = f"""
             SELECT
                 ticker, direction, signal_score as score, signal_price as entry_price, current_price,
                 pct_change as pnl_pct, is_win, scan_date
-            FROM `profitscout-fida8.profit_scout.signal_performance`
+            FROM {SIGNAL_PERFORMANCE_TABLE}
             WHERE 1=1
         """
 
@@ -172,7 +167,7 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
         # scan_date is STRING, so we use PARSE_DATE
         # Direction comparisons use UPPER() so the aggregation is casing-tolerant
         # against any schema drift in the signal_performance table.
-        query = """
+        query = f"""
             WITH stats AS (
                 SELECT
                     COUNT(*) as total_signals,
@@ -184,12 +179,12 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
                     COUNTIF(UPPER(direction) = 'BEARISH') as bear_total,
                     MAX(pct_change) as max_return,
                     MIN(pct_change) as min_return
-                FROM `profitscout-fida8.profit_scout.signal_performance`
+                FROM {SIGNAL_PERFORMANCE_TABLE}
                 WHERE PARSE_DATE('%Y-%m-%d', scan_date) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
             ),
             best_ticker AS (
                 SELECT ticker, AVG(pct_change) as avg_pnl
-                FROM `profitscout-fida8.profit_scout.signal_performance`
+                FROM {SIGNAL_PERFORMANCE_TABLE}
                 WHERE PARSE_DATE('%Y-%m-%d', scan_date) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
                 GROUP BY ticker
                 ORDER BY avg_pnl DESC
@@ -197,7 +192,7 @@ def get_win_rate_summary(days: int = 30) -> dict[str, Any]:
             ),
             worst_ticker AS (
                 SELECT ticker, AVG(pct_change) as avg_pnl
-                FROM `profitscout-fida8.profit_scout.signal_performance`
+                FROM {SIGNAL_PERFORMANCE_TABLE}
                 WHERE PARSE_DATE('%Y-%m-%d', scan_date) >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)
                 GROUP BY ticker
                 ORDER BY avg_pnl ASC
@@ -310,7 +305,7 @@ def get_position_history(
         # on the option premium and underlying_exit_price on the stock leg.
         # Also exclude INVALID_LIQUIDITY rows (contract had zero bars at 10:00 ET
         # day-1 so entry_price is NULL — these are terminal but uninformative).
-        query = """
+        query = f"""
             SELECT
                 scan_date, ticker, direction, recommended_contract,
                 entry_price, target_price, stop_price,
@@ -318,7 +313,7 @@ def get_position_history(
                 underlying_entry_price, underlying_exit_price, underlying_return,
                 spy_return_over_window,
                 entry_timestamp, exit_timestamp, policy_version
-            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+            FROM {FORWARD_PAPER_LEDGER}
             WHERE exit_timestamp IS NOT NULL
               AND DATE(exit_timestamp, 'America/New_York') < CURRENT_DATE('America/New_York')
               AND entry_price IS NOT NULL
@@ -352,9 +347,9 @@ def get_position_history(
 
         # Skip days are the honesty signal for fail-closed days (regime rail,
         # no candidates) — surface them alongside the trades, past days only.
-        skip_query = """
+        skip_query = f"""
             SELECT CAST(scan_date AS STRING) AS scan_date, skip_reason
-            FROM `profitscout-fida8.profit_scout.forward_paper_ledger`
+            FROM {FORWARD_PAPER_LEDGER}
             WHERE IFNULL(is_skipped, FALSE) = TRUE
               AND scan_date < CURRENT_DATE('America/New_York')
               AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)

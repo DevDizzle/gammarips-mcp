@@ -39,6 +39,8 @@ from zoneinfo import ZoneInfo
 import requests
 from google.cloud import bigquery
 
+from utils.data import BQ as _bq
+from utils.data import POOL_LIQUIDITY_TABLE as _POOL_LIQ_TABLE
 from utils.safety import GlobalToolBucket, safe_error
 
 logger = logging.getLogger(__name__)
@@ -60,17 +62,10 @@ _CONTRACT_RE = re.compile(r"O:([A-Z]{1,6})([0-9]{6})([CP])([0-9]{8})")
 _DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _UPSTREAM_BASE = "https://api.polygon.io"
 
-_POOL_LIQ_TABLE = "`profitscout-fida8.profit_scout.pool_liquidity_snapshot`"
 # A cache row older than this (seconds) no longer counts as "fresh" for the
 # cache-first path — 900s = 1.5x the engine's ~10-min refresh cadence.
 _CACHE_FRESH_S = int(os.getenv("SNAPSHOT_CACHE_FRESH_S", "900"))
 _BATCH_MAX_CONTRACTS = 60
-
-try:
-    _bq = bigquery.Client(project="profitscout-fida8")
-except Exception as e:  # noqa: BLE001
-    logger.error(f"market_snapshot: BigQuery client init failed: {e}")
-    _bq = None
 
 _REFRESH_CADENCE_NOTE = (
     "Cache rows are refreshed for the whole current pool every ~10 minutes "

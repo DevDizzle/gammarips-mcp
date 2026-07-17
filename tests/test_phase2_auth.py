@@ -127,43 +127,46 @@ def run_all():
         )
         auth._lookup_key = _fake_lookup
 
-        # --- unit: tiering ---
-        check("tier_anon_freemium", auth.tool_allowed("get_freemium_preview", "anon"))
-        check("tier_anon_denied_pool", not auth.tool_allowed("get_pool_features", "anon"))
-        check("tier_anon_denied_search", not auth.tool_allowed("web_search", "anon"))
-        check("tier_pro_everything", auth.tool_allowed("get_pool_features", "pro"))
+        # --- unit: tiering (V4 9-tool surface) ---
+        # free set = get_pool | get_regime_context | get_market_calendar_status
+        #            | get_playbook | get_daily_report
+        # pro set  = get_signal | get_liquidity | query_outcomes | replay_contract
+        check("tier_anon_pool", auth.tool_allowed("get_pool", "anon"))
+        check("tier_anon_denied_outcomes", not auth.tool_allowed("query_outcomes", "anon"))
+        check("tier_anon_denied_liquidity", not auth.tool_allowed("get_liquidity", "anon"))
+        check("tier_pro_everything", auth.tool_allowed("query_outcomes", "pro"))
 
         # --- integration: OFF mode = passthrough ---
         _reset()
         client = _make_client()
-        check("off_pro_tool_passes", _call(client, "get_pool_features").get("result") is not None)
+        check("off_pro_tool_passes", _call(client, "query_outcomes").get("result") is not None)
 
         # --- integration: SHADOW = never blocks ---
         _reset({"AUTH_SHADOW": "true"})
         client = _make_client()
         check(
             "shadow_pro_tool_no_key_passes",
-            _call(client, "get_pool_features").get("result") is not None,
+            _call(client, "query_outcomes").get("result") is not None,
         )
 
         # --- integration: ENFORCE ---
         _reset({"REQUIRE_API_KEY": "true"})
         client = _make_client()
-        anon_call = _call(client, "get_freemium_preview")
+        anon_call = _call(client, "get_pool")
         check("enforce_anon_tool_no_key_ok", anon_call.get("result") is not None)
-        denied = _call(client, "get_pool_features")
+        denied = _call(client, "query_outcomes")
         check(
             "enforce_pro_tool_no_key_denied",
             denied.get("error", {}).get("data", {}).get("code") == "subscription_required",
             f"({denied.get('error', {}).get('code')})",
         )
-        allowed = _call(client, "get_pool_features", key=PRO_KEY)
+        allowed = _call(client, "query_outcomes", key=PRO_KEY)
         check("enforce_pro_tool_with_key_ok", allowed.get("result") is not None)
-        rev_call = _call(client, "get_pool_features", key=REVOKED_KEY)
+        rev_call = _call(client, "query_outcomes", key=REVOKED_KEY)
         check("enforce_revoked_key_denied", rev_call.get("error", {}).get("code") == -32001)
 
         # BATCH bypass must be closed: a batched pro call (no key) is denied.
-        batch_denied = _call_batch(client, ["get_freemium_preview", "get_pool_features"])
+        batch_denied = _call_batch(client, ["get_pool", "query_outcomes"])
         check(
             "enforce_batch_pro_denied",
             isinstance(batch_denied, dict)
@@ -171,7 +174,7 @@ def run_all():
             == "subscription_required",
         )
         # A batch of only-anon tools passes through (stub returns a per-id list).
-        batch_ok = _call_batch(client, ["get_freemium_preview", "get_daily_report"])
+        batch_ok = _call_batch(client, ["get_pool", "get_daily_report"])
         check(
             "enforce_batch_all_anon_passes",
             isinstance(batch_ok, list) and all("result" in r for r in batch_ok),
@@ -181,15 +184,15 @@ def run_all():
         check("enforce_tools_list_passes", r.json().get("result") is not None)
 
         # --- ANON_TOOLS env override ---
-        _reset({"REQUIRE_API_KEY": "true", "ANON_TOOLS": "get_overnight_signals"})
+        _reset({"REQUIRE_API_KEY": "true", "ANON_TOOLS": "get_liquidity"})
         client = _make_client()
         check(
-            "env_override_makes_scan_anon",
-            _call(client, "get_overnight_signals").get("result") is not None,
+            "env_override_makes_liquidity_anon",
+            _call(client, "get_liquidity").get("result") is not None,
         )
         check(
-            "env_override_freemium_now_pro",
-            _call(client, "get_freemium_preview").get("error", {}).get("code") == -32001,
+            "env_override_pool_now_pro",
+            _call(client, "get_pool").get("error", {}).get("code") == -32001,
         )
     finally:
         auth._lookup_key = orig_lookup

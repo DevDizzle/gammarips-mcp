@@ -38,86 +38,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SERVER_VERSION = "3.0.0"
+SERVER_VERSION = "4.0.0"
 
 # Initialize FastMCP server
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
 
-# Import tools
-from tools.contract_history import get_contract_marks, replay_contract
-from tools.earnings import get_earnings_window
-from tools.education import get_market_calendar_status, get_signal_explainer
-from tools.historical import get_historical_performance
-from tools.market_snapshot import get_contract_snapshot, get_pool_liquidity
-from tools.metadata import get_available_dates, get_enriched_signal_schema
-from tools.overnight_signals import (
-    get_enriched_signals,
-    get_freemium_preview,
-    get_overnight_signals,
-    get_signal_detail,
-)
-from tools.performance_tracker import (
-    get_position_history,
-    get_signal_performance,
-    get_win_rate_summary,
-)
-from tools.playbooks import get_playbook, list_playbooks
-from tools.reports import get_daily_report, get_report_list
-from tools.substrate import (
-    estimate_exit_rule,
-    get_harvest_curve,
-    get_opportunity_surface,
-    get_outcome_summary,
-    get_pool_features,
+# Import the 9 V4 consolidated tools. Each is a thin arg-driven dispatcher over
+# the V3 query logic (see tools/v4.py); the leakage-safe implementations are
+# reused verbatim. web_search is KILLED in V4.
+from tools.v4 import (
+    get_daily_report,
+    get_liquidity,
+    get_market_calendar_status,
+    get_playbook,
+    get_pool,
     get_regime_context,
+    get_signal,
     query_outcomes,
+    replay_contract,
 )
-from tools.web_search import web_search
 
-# Register tools with the MCP server (29 tools).
+# Register tools with the MCP server (9 tools — V4 consolidation, 2026-07-17).
 # NOTE: docstrings are the tool descriptions — keep them agent-facing.
 _ALL_TOOLS = {
-    # live pool
-    "get_overnight_signals": get_overnight_signals,
-    "get_enriched_signals": get_enriched_signals,
-    "get_signal_detail": get_signal_detail,
-    "get_freemium_preview": get_freemium_preview,
-    # live market data (RM-001a + Priority-1A/1B — entry-day freshness,
-    # cache-first from the engine's ~10-min pool refresh; no quote fields)
-    "get_contract_snapshot": get_contract_snapshot,
-    "get_pool_liquidity": get_pool_liquidity,
-    # safety rails the harness must reconstruct (RM-003 — earnings window)
-    "get_earnings_window": get_earnings_window,
-    # bring-your-own-rule data reads (RM-004/RM-002 — marks + minute replay;
-    # no exit logic here)
-    "get_contract_marks": get_contract_marks,
-    "replay_contract": replay_contract,
-    # research substrate
-    "get_pool_features": get_pool_features,
-    "get_opportunity_surface": get_opportunity_surface,
+    # the candidate pool (enriched | raw | features | preview)
+    "get_pool": get_pool,
+    # one ticker/contract (detail | earnings)
+    "get_signal": get_signal,
+    # fresh entry-day liquidity (one contract | whole pool)
+    "get_liquidity": get_liquidity,
+    # realized outcomes + receipts substrate (view= modes)
     "query_outcomes": query_outcomes,
-    "get_outcome_summary": get_outcome_summary,
-    "estimate_exit_rule": estimate_exit_rule,
-    "get_harvest_curve": get_harvest_curve,
+    # raw price tape for your own exit rule (minute | day)
+    "replay_contract": replay_contract,
+    # regime rail (unchanged)
     "get_regime_context": get_regime_context,
-    # methodology
-    "list_playbooks": list_playbooks,
-    "get_playbook": get_playbook,
-    # performance / receipts
-    "get_signal_performance": get_signal_performance,
-    "get_win_rate_summary": get_win_rate_summary,
-    "get_position_history": get_position_history,
-    "get_historical_performance": get_historical_performance,
-    # reports & metadata
-    "get_daily_report": get_daily_report,
-    "get_report_list": get_report_list,
-    "get_available_dates": get_available_dates,
-    "get_enriched_signal_schema": get_enriched_signal_schema,
-    # reference / education
+    # market calendar (status | scan_dates)
     "get_market_calendar_status": get_market_calendar_status,
-    "get_signal_explainer": get_signal_explainer,
-    # external
-    "web_search": web_search,
+    # methodology + field dict + data-contract schema
+    "get_playbook": get_playbook,
+    # daily report (report | list)
+    "get_daily_report": get_daily_report,
 }
 
 for _fn in _ALL_TOOLS.values():
@@ -134,11 +95,11 @@ def morning_brief() -> str:
     """Compose a morning briefing from the pool, regime, and surfaces."""
     return (
         "Prepare my GammaRips morning brief. Steps: "
-        "1) get_market_calendar_status — is the market open today? "
-        "2) get_regime_context — does the VIX<=VIX3M rail pass? "
-        "3) get_enriched_signals — pull today's curated pool. "
-        "4) get_outcome_summary(horizon='3d', group_by='delta_bucket') for "
-        "historical context. "
+        "1) get_market_calendar_status() — is the market open today? "
+        "2) get_regime_context() — does the VIX<=VIX3M rail pass? "
+        "3) get_pool() — pull today's curated (enriched) pool. "
+        "4) query_outcomes(view='summary', horizon='3d', group_by='delta_bucket') "
+        "for historical context. "
         "Then summarize: regime state, the 5 most interesting candidates with "
         "their contract specs and why, and any data caveats (stale OI, "
         "illiquid tail). Do NOT recommend a single trade — present the "
@@ -151,12 +112,12 @@ def analyze_candidate(ticker: str) -> str:
     """Deep-dive one pool candidate: enrichment, features, history, excursions."""
     return (
         f"Deep-dive the GammaRips candidate {ticker}. Steps: "
-        f"1) get_signal_detail(ticker='{ticker}', full=true) for the full enrichment. "
-        f"2) get_opportunity_surface(ticker='{ticker}', days=60) for its "
+        f"1) get_signal(ticker='{ticker}', full=true) for the full enrichment. "
+        f"2) query_outcomes(view='surface', ticker='{ticker}', days=60) for its "
         "recent excursion history. "
-        f"3) query_outcomes(ticker='{ticker}', horizon='3d') for realized "
-        "labels. "
-        "4) get_signal_explainer for any field you're unsure about. "
+        f"3) query_outcomes(view='labels', ticker='{ticker}', horizon='3d') for "
+        "realized labels. "
+        "4) get_playbook(field='<name>') to explain any field you're unsure about. "
         "Synthesize: the thesis, the quantitative profile (delta, momentum, "
         "flow), how similar setups resolved historically, and the honest "
         "risks. No trade recommendation — give me the decision surface."
@@ -168,8 +129,8 @@ def run_your_own_tournament() -> str:
     """Run the bracket-tournament selection pattern over today's pool with MY objective."""
     return (
         "Run the GammaRips tournament selection pattern on today's pool. "
-        "First fetch get_playbook('run-your-own-tournament') and follow it "
-        "exactly: pull get_enriched_signals, shuffle into batches of <=10, "
+        "First fetch get_playbook(name='run-your-own-tournament') and follow it "
+        "exactly: pull get_pool(), shuffle into batches of <=10, "
         "advance top-2 per batch by comparative judgment against MY objective "
         "(ask me for horizon and risk tolerance if I haven't said), repeat to "
         "a winner, run 3 independent brackets, and report the consensus with "

@@ -77,16 +77,16 @@ def get_auth_mode() -> str:
 # ANON_TOOLS env var (comma-separated) so the owner can move a tool between
 # tiers without a code change.
 
+# V4 free set (5 tools): the pool teaser + published-free report + methodology
+# + regime + pure calendar reference. The 4 pro tools (get_signal,
+# get_liquidity, query_outcomes, replay_contract) require an active key.
 _DEFAULT_ANON_TOOLS = frozenset(
     {
-        "get_freemium_preview",  # the teaser
-        "get_daily_report",  # published free on the website
-        "get_report_list",
-        "list_playbooks",  # methodology = marketing
-        "get_playbook",
-        "get_market_calendar_status",  # pure reference
-        "get_signal_explainer",
-        "get_available_dates",
+        "get_pool",  # the curated pool (free preview / SEO funnel)
+        "get_regime_context",  # regime rail
+        "get_market_calendar_status",  # pure reference (status | scan_dates)
+        "get_playbook",  # methodology + field dict + data-contract schema
+        "get_daily_report",  # published free on the website (report | list)
     }
 )
 

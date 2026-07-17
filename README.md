@@ -20,45 +20,52 @@ Every trading morning GammaRips scans the US options market for unusual institut
   blocked yet); flips to enforce once keys are issued. Get one at
   [gammarips.com/pricing](https://gammarips.com/pricing).
 
-## Available tools (25)
+## Available tools (9)
 
-### Live pool
+V4 (2026-07-17) consolidated the 29-tool V3 surface into 9. The absorbed tools
+live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
 
-- `get_contract_snapshot` — fresh entry-day OI / session volume / last trade / day range for one contract (no quote fields on this data plan)
-- `get_enriched_signals` — the curated daily candidate pool: enrichment narrative, technicals, catalyst, recommended contract, `mom_60` (leakage-safe view)
-- `get_signal_detail` — full enrichment for one ticker
-- `get_overnight_signals` — the raw pre-curation scan (wide net)
-- `get_freemium_preview` — top-N teaser, narrow fields
+**Free tier** (no key): `get_pool`, `get_regime_context`,
+`get_market_calendar_status`, `get_playbook`, `get_daily_report`.
+**Pro tier** (Agent Access, $39/mo key): `get_signal`, `get_liquidity`,
+`query_outcomes`, `replay_contract`.
 
-### Research substrate (V3)
-- `get_pool_features` — point-in-time feature vectors from the allowlist features view
-- `get_opportunity_surface` — per-contract realized MFE/MAE excursions, exit-free (the core product surface)
-- `query_outcomes` — row-level bracket labels (same-day GIGO or 3-day) joined to features
-- `get_outcome_summary` — grouped aggregates (delta bucket, score, exit reason, ...) with honest exclusion counts
-- `get_harvest_curve` — touch-probability curve (P(peak ≥ X) w/ CIs), day-of-peak buckets, stop-touch rates, live from the closed-window surface
-- `estimate_exit_rule` — classify YOUR (target, stop) bracket against the surface; EV bounds, heuristic share reported
-- `get_regime_context` — VIX/VIX3M/SPY-trend as-of scan date + the fail-closed rail
+- `get_pool` **(free)** — the candidate pool: `view="enriched"` (curated
+  narrative/technicals/contract/`mom_60`, leakage-safe view; default),
+  `"raw"` (pre-curation scan), `"features"` (point-in-time feature vectors
+  from the allowlist view), `"preview"` (public teaser).
+- `get_signal` **(pro)** — one ticker: `view="detail"` (full enrichment,
+  default) or `view="earnings"` (the doctrine earnings-window check).
+- `get_liquidity` **(pro)** — fresh entry-day liquidity: a single `contract`
+  (cache-first, `live=true` to force upstream) or the whole pool / a
+  `contracts` shortlist in one call. No quote fields on this data plan.
+- `query_outcomes` **(pro)** — the outcomes + receipts substrate, via `view=`:
+  `labels` (row-level bracket labels + features; default), `summary` (grouped
+  aggregates), `surface` (per-contract MFE/MAE excursions, exit-free),
+  `harvest` (touch-probability curve), `exit_rule` (score YOUR bracket/trailing
+  rule), `signal_performance` / `win_rate` (UNDERLYING-direction, **not** option
+  PnL), `positions` / `performance` (the engine's realized paper-trade receipts,
+  cohort-filtered, default live `V7_1_TILTED_GIGO`).
+- `replay_contract` **(pro)** — raw price tape for your own exit rule:
+  `granularity="minute"` (intraday path + exact first-crossing; default) or
+  `"day"` (daily OHLCV mark series). This server does not simulate exits.
+- `get_regime_context` **(free)** — VIX/VIX3M/SPY-trend as-of scan date + the
+  fail-closed regime rail.
+- `get_market_calendar_status` **(free)** — `view="status"` (NYSE open/close,
+  default) or `view="scan_dates"` (which scan dates have data).
+- `get_playbook` **(free)** — methodology + reference: no arg lists the
+  catalog; `name=` fetches a playbook (`start-here`, `daily-workflow`,
+  `run-your-own-tournament`, `exit-lab`, `leakage-and-data-contract`,
+  `changelog`) or `name="schema"` the machine-readable data contract (per-column
+  leakage classification); `field=` explains any signal field (deterministic,
+  no LLM). Playbooks are also MCP resources (`gammarips://playbooks/{name}`).
+- `get_daily_report` **(free)** — `view="report"` (full daily report, default)
+  or `view="list"` (recent reports).
 
-### Methodology
-- `list_playbooks` / `get_playbook` — server-versioned playbooks: `start-here`, `daily-workflow`, `run-your-own-tournament`, `exit-lab`, `leakage-and-data-contract`, `changelog`. Also exposed as MCP resources (`gammarips://playbooks/{name}`).
-
-### Performance / receipts
-- `get_position_history` — the engine's realized paper trades (T+1 receipts; cohort-filtered, default live `V7_1_TILTED_GIGO`)
-- `get_historical_performance` — cohort aggregate of the above
-- `get_signal_performance` / `get_win_rate_summary` — UNDERLYING-stock direction outcomes for the broad pool (explicitly **not** option PnL)
-
-### Reports & metadata
-- `get_daily_report` / `get_report_list` — daily intelligence reports
-- `get_available_dates` — scan dates with data
-- `get_enriched_signal_schema` — the machine-readable data contract: every substrate column with its leakage classification (`feature | label | opportunity | regime_telemetry | identity`) and as-of boundary
-
-### Reference / external
-- `get_market_calendar_status` — NYSE calendar status
-- `get_signal_explainer` — plain-English definition of any field (deterministic, no LLM)
-- `web_search` — Google Custom Search (rate-limited, 10 req/min/IP)
-
-### Removed in V3
-`get_todays_pick`, `list_todays_picks`, `get_open_position` — the engine's own daily selection is no longer published same-day (realized receipts remain via `get_position_history`).
+### Removed
+`web_search` (V4). The engine's own daily selection is not published same-day
+(`get_todays_pick` / `list_todays_picks` / `get_open_position` removed in V3);
+realized receipts remain via `query_outcomes(view="positions")`.
 
 ## Prompts
 
@@ -110,7 +117,7 @@ MCP Servers → Remote Servers → Add, or add to `cline_mcp_settings.json`:
 }
 ```
 
-Omit `headers` for the free tier (8 anon tools).
+Omit `headers` for the free tier (5 anon tools).
 
 ### Generic MCP config
 
@@ -126,7 +133,7 @@ Omit `headers` for the free tier (8 anon tools).
 
 Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
 
-Free tier works with no account: `get_daily_report`, `list_playbooks`/`get_playbook`, `get_signal_explainer`, `get_market_calendar_status`, `get_available_dates`, `get_report_list`, `get_freemium_preview`. Pro tools require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing).
+Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing).
 
 ## Local development
 
