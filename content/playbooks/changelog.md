@@ -2,6 +2,15 @@
 
 Dated record of changes that affect how you should interpret the data. Re-check this playbook periodically; it is the subscription's "what moved" feed.
 
+## 2026-07-17 — v4: 9-tool consolidation + methodology corpus
+- The surface consolidated from ~29 tools to **9**. Older tool names are now `view=`/`granularity=` modes on the 9:
+  - pool reads → `get_pool(view="enriched"|"raw"|"features"|"preview")` — `preview` is free; `enriched`/`raw`/`features` need an active key.
+  - one ticker → `get_signal(view="detail"|"earnings")`; fresh entry-day liquidity → `get_liquidity`.
+  - all outcomes + receipts → `query_outcomes(view=...)`: `positions` (was get_position_history), `performance` (was get_historical_performance), `surface` (was get_opportunity_surface), `harvest` (was get_harvest_curve), `exit_rule` (was estimate_exit_rule), `signal_performance`, `win_rate`, `summary`, `labels`.
+  - price tape → `replay_contract(granularity="minute"|"day")`; calendar → `get_market_calendar_status`; methodology → `get_playbook`; regime → `get_regime_context`; report → `get_daily_report`.
+  - `web_search` removed.
+- NEW methodology corpus behind `get_playbook` (free): start at `get_playbook("methodology")` for the selection logic (how the pool is built and why), the edge findings, and the supporting literature.
+
 ## 2026-07-06 — Research drop + tool wave (the living-research feed, working)
 **Three pre-registered studies (two on all expired pool contracts, Apr 10 - Jun 30 2026 scans; one on all closed 3-day excursion windows, scans through Jun 26):**
 - **Delta-calibrated:** realized ITM-at-expiry 41.3% vs mean scan-time |delta| 42.1% (N=2,146) — the pool converts at the market-implied rate; treat |delta| as your base rate.
@@ -23,7 +32,7 @@ Full context in `get_playbook("exit-lab")`. One regime arc so far — these re-r
 - `get_enriched_signal_schema` now returns the full machine-readable column classification (feature/label/opportunity/telemetry/identity + as-of boundaries).
 
 ## 2026-06-26 — V7.1 "Tilted GIGO" cohort live
-- Live paper-cohort policy: same-day bracket — enter 10:00 ET, +40% target / −30% stop, flat 15:45 ET, no overnight hold. Cohort label `V7_1_TILTED_GIGO`; receipts before this date belong to earlier policies and are not comparable.
+- Live paper-cohort policy: same-day bracket — enter 10:00 ET, +40% target / −30% stop, flat 15:45 ET, no overnight hold. This is the current same-day cohort; receipts before this date belong to earlier policies and are not comparable.
 - Selection unchanged (randomized bracket tournament over the BULLISH pool) plus a 60-day-momentum pre-rank tilt.
 
 ## 2026-06-25 — Live open-interest floor at selection
