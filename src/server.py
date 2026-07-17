@@ -333,7 +333,7 @@ async def handle_jsonrpc(request: Request):
             identity = getattr(request.state, "identity", None)
             if identity is None:
                 identity = resolve_identity(request.headers)
-            if not tool_allowed(tool_name, identity.tier):
+            if not tool_allowed(tool_name, identity.tier, tool_args):
                 return JSONResponse(
                     content={
                         "jsonrpc": "2.0",

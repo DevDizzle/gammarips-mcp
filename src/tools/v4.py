@@ -108,6 +108,11 @@ def get_pool(
         headline, directional UOA) for the most recent scan; no contract
         specifics or thesis.
 
+    TIER: view="preview" is FREE (no key). The enriched / raw / features views
+    are the paid product — they require an active pro subscription key; an anon
+    call to them returns `subscription_required` (get_pool(view='preview') is
+    named as the free entry point).
+
     Liquidity caveat (all views): `recommended_oi`/`recommended_volume` are
     scan-time snapshots, not live values; `recommended_spread_pct` is
     permanently NULL on the current data plan — re-check with get_liquidity.

@@ -65,22 +65,29 @@ def _make_client():
     return TestClient(app)
 
 
-def _call(client, tool, key=None):
+def _call(client, tool, key=None, arguments=None):
     headers = {"Authorization": f"Bearer {key}"} if key else {}
+    params = {"name": tool}
+    if arguments is not None:
+        params["arguments"] = arguments
     r = client.post(
         "/rpc",
-        json={"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": tool}},
+        json={"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": params},
         headers=headers,
     )
     return r.json()
 
 
 def _call_batch(client, tools, key=None):
+    """`tools` items are either a tool name or a (name, arguments) tuple."""
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    batch = [
-        {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": t}}
-        for i, t in enumerate(tools)
-    ]
+    batch = []
+    for i, t in enumerate(tools):
+        name, args = t if isinstance(t, tuple) else (t, None)
+        params = {"name": name}
+        if args is not None:
+            params["arguments"] = args
+        batch.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": params})
     return client.post("/rpc", json=batch, headers=headers).json()
 
 
@@ -128,13 +135,25 @@ def run_all():
         auth._lookup_key = _fake_lookup
 
         # --- unit: tiering (V4 9-tool surface) ---
-        # free set = get_pool | get_regime_context | get_market_calendar_status
-        #            | get_playbook | get_daily_report
+        # free set = get_pool(view=preview) | get_regime_context
+        #            | get_market_calendar_status | get_playbook | get_daily_report
         # pro set  = get_signal | get_liquidity | query_outcomes | replay_contract
-        check("tier_anon_pool", auth.tool_allowed("get_pool", "anon"))
+        #            + get_pool enriched/raw/features (the paid pool)
+        check("tier_anon_pool_preview", auth.tool_allowed("get_pool", "anon", {"view": "preview"}))
+        check(
+            "tier_anon_pool_enriched_denied",
+            not auth.tool_allowed("get_pool", "anon", {"view": "enriched"}),
+        )
+        check(
+            "tier_anon_pool_raw_denied",
+            not auth.tool_allowed("get_pool", "anon", {"view": "raw"}),
+        )
+        # missing view defaults to the paid ("enriched") view -> anon denied
+        check("tier_anon_pool_default_denied", not auth.tool_allowed("get_pool", "anon"))
         check("tier_anon_denied_outcomes", not auth.tool_allowed("query_outcomes", "anon"))
         check("tier_anon_denied_liquidity", not auth.tool_allowed("get_liquidity", "anon"))
         check("tier_pro_everything", auth.tool_allowed("query_outcomes", "pro"))
+        check("tier_pro_pool_full", auth.tool_allowed("get_pool", "pro", {"view": "enriched"}))
 
         # --- integration: OFF mode = passthrough ---
         _reset()
@@ -152,8 +171,20 @@ def run_all():
         # --- integration: ENFORCE ---
         _reset({"REQUIRE_API_KEY": "true"})
         client = _make_client()
-        anon_call = _call(client, "get_pool")
-        check("enforce_anon_tool_no_key_ok", anon_call.get("result") is not None)
+        # get_pool free-preview view: anon, no key -> allowed
+        anon_preview = _call(client, "get_pool", arguments={"view": "preview"})
+        check("enforce_anon_pool_preview_ok", anon_preview.get("result") is not None)
+        # get_pool full pool (default enriched view): anon, no key -> DENIED
+        # (the paid product must not leak to the free funnel)
+        anon_full = _call(client, "get_pool")
+        check(
+            "enforce_anon_pool_full_denied",
+            anon_full.get("error", {}).get("data", {}).get("code") == "subscription_required",
+            f"({anon_full.get('error', {}).get('code')})",
+        )
+        # pro key -> full pool allowed
+        pro_full = _call(client, "get_pool", key=PRO_KEY, arguments={"view": "enriched"})
+        check("enforce_pro_pool_full_ok", pro_full.get("result") is not None)
         denied = _call(client, "query_outcomes")
         check(
             "enforce_pro_tool_no_key_denied",
@@ -165,16 +196,17 @@ def run_all():
         rev_call = _call(client, "query_outcomes", key=REVOKED_KEY)
         check("enforce_revoked_key_denied", rev_call.get("error", {}).get("code") == -32001)
 
-        # BATCH bypass must be closed: a batched pro call (no key) is denied.
-        batch_denied = _call_batch(client, ["get_pool", "query_outcomes"])
+        # BATCH bypass must be closed: an anon-allowed tool batched WITH a pro
+        # call (no key) still denies (the pro element can't ride along).
+        batch_denied = _call_batch(client, [("get_pool", {"view": "preview"}), "query_outcomes"])
         check(
             "enforce_batch_pro_denied",
             isinstance(batch_denied, dict)
             and batch_denied.get("error", {}).get("data", {}).get("code")
             == "subscription_required",
         )
-        # A batch of only-anon tools passes through (stub returns a per-id list).
-        batch_ok = _call_batch(client, ["get_pool", "get_daily_report"])
+        # A batch of only-anon-allowed calls passes through (per-id list).
+        batch_ok = _call_batch(client, [("get_pool", {"view": "preview"}), "get_daily_report"])
         check(
             "enforce_batch_all_anon_passes",
             isinstance(batch_ok, list) and all("result" in r for r in batch_ok),

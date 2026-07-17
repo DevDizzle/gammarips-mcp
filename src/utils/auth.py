@@ -98,11 +98,39 @@ def anon_tools() -> frozenset[str]:
     return _DEFAULT_ANON_TOOLS
 
 
-def tool_allowed(tool: str, tier: str) -> bool:
-    """Pro can call everything; anon is limited to the funnel set."""
+# get_pool is anon-DISCOVERABLE (the SEO/funnel teaser lives there), but only
+# its `preview` view is free. The enriched / raw / features views ARE the paid
+# product (the curated pool + point-in-time feature vectors), so anon callers
+# are limited to view="preview"; everything richer requires an active pro key.
+# This is the "free preview / pro full" tier from the ratified v4 tool map,
+# enforced in the SAME gate as the rest of the paywall (transport-uniform, no
+# handler-side request plumbing). Fail-closed: a missing/unparseable view
+# resolves to the paid default ("enriched"), so anon must ASK for a free view.
+_POOL_FREE_VIEWS = frozenset({"preview"})
+
+
+def _pool_view(arguments) -> str:
+    """The get_pool `view` arg, normalized. Anything not an explicit string
+    view resolves to the handler default ("enriched"), a PAID view."""
+    if not isinstance(arguments, dict):
+        return "enriched"
+    v = arguments.get("view")
+    if not isinstance(v, str):
+        return "enriched"
+    return v.strip().lower()
+
+
+def tool_allowed(tool: str, tier: str, arguments=None) -> bool:
+    """Pro can call everything. Anon is limited to the funnel set, and WITHIN
+    get_pool to the free preview view only (enriched/raw/features are the paid
+    product). `arguments` is the tools/call arguments dict when available."""
     if tier == "pro":
         return True
-    return tool in anon_tools()
+    if tool not in anon_tools():
+        return False
+    if tool == "get_pool":
+        return _pool_view(arguments) in _POOL_FREE_VIEWS
+    return True
 
 
 # --- identity resolution ---------------------------------------------------
@@ -281,10 +309,18 @@ def meter(identity: Identity, tool: str, decision: str, mode: str) -> None:
 
 def denied_error(tool: str) -> dict:
     """JSON-RPC error object for a tool a caller isn't entitled to."""
+    # get_pool IS free at view="preview"; only the full pool is pro. Say so, so
+    # a funnel agent knows the free entry point instead of just bouncing off.
+    hint = (
+        "get_pool(view='preview') is free; the full enriched / raw / features "
+        "pool requires a subscription. "
+        if tool == "get_pool"
+        else ""
+    )
     return {
         "code": -32001,
         "message": (
-            f"'{tool}' requires a GammaRips subscription. Subscribe and generate "
+            hint + f"'{tool}' requires a GammaRips subscription. Subscribe and generate "
             f"an API key at {PRICING_URL}, then send it as an Authorization: "
             f"Bearer header."
         ),
@@ -301,11 +337,13 @@ def denied_error(tool: str) -> dict:
 # --- middleware ------------------------------------------------------------
 
 
-async def _extract_tool_calls(request: Request) -> list[tuple[str, object]]:
-    """Return every JSON-RPC `tools/call` in the body as (tool_name, id).
+async def _extract_tool_calls(request: Request) -> list[tuple[str, object, dict]]:
+    """Return every JSON-RPC `tools/call` in the body as (tool_name, id, args).
     Handles BOTH a single object and a batch (array) — a batched pro call must
-    not slip past the gate. Body is cached back onto the request so downstream
-    handlers can re-read it. Returns [] for non-tool / unparseable bodies."""
+    not slip past the gate. `args` is needed for arg-level tiering (get_pool's
+    free preview vs paid full views). Body is cached back onto the request so
+    downstream handlers can re-read it. Returns [] for non-tool / unparseable
+    bodies."""
     try:
         body = await request.body()
         request._body = body  # noqa: SLF001 — re-attach for downstream readers
@@ -315,12 +353,14 @@ async def _extract_tool_calls(request: Request) -> list[tuple[str, object]]:
     except Exception:  # noqa: BLE001
         return []
     items = payload if isinstance(payload, list) else [payload]
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[str, object, dict]] = []
     for it in items:
         if isinstance(it, dict) and it.get("method") == "tools/call":
-            name = (it.get("params") or {}).get("name")
+            params = it.get("params") or {}
+            name = params.get("name")
             if name:
-                calls.append((name, it.get("id")))
+                args = params.get("arguments")
+                calls.append((name, it.get("id"), args if isinstance(args, dict) else {}))
     return calls
 
 
@@ -345,8 +385,8 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
 
         denied_tool: str | None = None
         denied_id: object = None
-        for name, call_id in calls:
-            allowed = tool_allowed(name, identity.tier)
+        for name, call_id, arguments in calls:
+            allowed = tool_allowed(name, identity.tier, arguments)
             if allowed:
                 decision = "allowed"
             elif mode == MODE_SHADOW:
