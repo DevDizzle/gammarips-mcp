@@ -143,6 +143,74 @@ def _ok(result, name: str):
     return result
 
 
+# The curated PUBLIC methodology corpus served through get_playbook (the
+# wiki-brain). Every slug here must be catalog-listed, fetchable, and — because
+# these render through a FREE public tool — free of internal-infra identifiers.
+_METHODOLOGY_PAGES = {
+    # selection / methodology policy — how the pool is built and why
+    "enrichment-definition",
+    "bullish-only-hard-gate",
+    "tourney-pool-cap-edge-rank",
+    "bracket-tournament-selection",
+    "gigo-same-day-exit",
+    "earnings-exclusion-rail",
+    "regime-rail-vix-term",
+    "leakage-safety-gate",
+    "spread-gate-retired",
+    "opportunity-surface",
+    # findings (tested on our cohorts)
+    "bullish-direction-asymmetry",
+    "delta-band-0-20-0-46",
+    "option-pnl-not-underlying",
+    "fixed-exit-composites-negative",
+    "pool-delta-calibrated",
+    "path-calibrated-giveback",
+    "three-day-harvest-curve",
+    "moneyness-10-15-otm",
+    "mom-60-conditional-lever",
+    "voi-ratio-anti-edge",
+    "oi-not-quality-signal",
+    "ride-winners-mean-reverts",
+    "entry-1000-et",
+    # literature
+    "earnings-iv-crush",
+    "position-sizing-basics",
+    # the catalog/index note
+    "methodology",
+}
+
+# Internal-infra identifiers that must NEVER appear in a public methodology
+# page (service names, BQ tables, env vars, model ids, vendors, private doc
+# paths, GCP project). Matched case-insensitively as substrings. Public field
+# names (overnight_score, mom_60, recommended_*) are intentionally NOT here.
+_BANNED_METHODOLOGY_TOKENS = (
+    "enrichment-trigger",
+    "signal-notifier",
+    "signal-judge",
+    "overnight_signals_enriched",
+    "enriched_option_outcomes",
+    "forward_paper_ledger",
+    "todays_pick",
+    "paper_shadow",
+    "paper-shadow",
+    "topscore",
+    "shadow-tracker",
+    "bullish_only",
+    "tourney_pool_cap",
+    "oi_floor",
+    "gemini-3.1",
+    "tournament_v1",
+    "polygon",
+    "financialmodelingprep",
+    "bigquery",
+    "cloud run",
+    "decisions/",
+    "findings_ledger",
+    "intelligence_brief",
+    "profitscout",
+)
+
+
 def run_all() -> list[tuple[str, str]]:
     sys.path.insert(0, "src")
 
@@ -446,6 +514,7 @@ def run_all() -> list[tuple[str, str]]:
             if set(r) & {"bid", "ask", "spread_pct", "mid"}
             else f"(oi={r.get('open_interest')}, vol={r.get('day_volume')}, as_of={str(r.get('as_of'))[:16]})"
         ),
+        credential_optional=True,
     )
     check(
         "get_liquidity[contract,bad-input]",
@@ -478,6 +547,7 @@ def run_all() -> list[tuple[str, str]]:
                 f"underlying_price={r.get('underlying_price')}",
             )
         ),
+        credential_optional=True,
     )
 
     def _snapshot_live_check():
@@ -744,6 +814,43 @@ def run_all() -> list[tuple[str, str]]:
             else _fail("get_playbook[name]", "path traversal accepted!")
         ),
         expect_error=True,
+    )
+
+    # --- wiki-brain: the curated methodology corpus is catalog-listed ------
+    def _verify_methodology_catalog(out):
+        listed = {p.get("name") for p in out.get("playbooks", [])}
+        missing = _METHODOLOGY_PAGES - listed
+        if missing:
+            _fail("get_playbook[methodology,catalog]", f"not in catalog: {sorted(missing)}")
+        return f"({len(_METHODOLOGY_PAGES)} methodology pages listed, {len(listed)} total)"
+
+    check("get_playbook[methodology,catalog]", get_playbook, _verify_methodology_catalog)
+
+    # every methodology page fetches with real content AND is scrubbed of
+    # internal-infra identifiers (it renders through a FREE public tool).
+    def _verify_methodology_pages(_):
+        for slug in sorted(_METHODOLOGY_PAGES):
+            page = get_playbook(name=slug)
+            if page.get("error") or not (page.get("content") or "").strip():
+                _fail("get_playbook[methodology,fetch]", f"{slug}: empty/error")
+            body = page["content"].lower()
+            hit = [t for t in _BANNED_METHODOLOGY_TOKENS if t in body]
+            if hit:
+                _fail("get_playbook[methodology,scrub]", f"{slug} leaks {hit}")
+        return f"({len(_METHODOLOGY_PAGES)} pages fetched + scrubbed clean)"
+
+    check("get_playbook[methodology,fetch+scrub]", lambda: None, _verify_methodology_pages)
+
+    # index note must resolve the two representative slugs it advertises
+    check(
+        "get_playbook[methodology,index]",
+        lambda: get_playbook(name="methodology"),
+        lambda r: (
+            "(index lists selection + findings)"
+            if "bracket-tournament-selection" in r.get("content", "")
+            and "fixed-exit-composites-negative" in r.get("content", "")
+            else _fail("get_playbook[methodology,index]", "index missing corpus links")
+        ),
     )
 
     # --- performance / receipts (query_outcomes receipts views) ------------

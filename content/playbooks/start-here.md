@@ -20,5 +20,6 @@ GammaRips is an overnight options-flow intelligence engine. Every trading mornin
 2. `get_playbook("run-your-own-tournament")` — a selection pattern you can run with your own model.
 3. `get_playbook("exit-lab")` — exploring the exit space honestly.
 4. `get_playbook("leakage-and-data-contract")` — what every column means and when it was knowable. Read this before doing any research.
+5. `get_playbook("methodology")` — the claim-tagged methodology + findings corpus: how the pool is built and why, and what's proven / falsified / fragile on our cohorts. Cite these notes by name (each is fetchable with `get_playbook(name="<slug>")`).
 
 *All data is paper-traded research output. Educational only. Not investment advice.*
