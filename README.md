@@ -10,10 +10,10 @@ Every trading morning GammaRips scans the US options market for unusual institut
 
 ## Hosted MCP endpoint
 
-- **Streamable HTTP (primary):** `https://gammarips-mcp-406581297632.us-central1.run.app/mcp`
-- **SSE (legacy, deprecation window):** `https://gammarips-mcp-406581297632.us-central1.run.app/sse`
-- **Stateless JSON-RPC:** `https://gammarips-mcp-406581297632.us-central1.run.app/jsonrpc`
-- **Server card:** `https://gammarips-mcp-406581297632.us-central1.run.app/.well-known/mcp/server-card.json`
+- **Streamable HTTP (primary):** `https://mcp.gammarips.com/mcp`
+- **SSE (legacy, deprecation window):** `https://mcp.gammarips.com/sse`
+- **Stateless JSON-RPC:** `https://mcp.gammarips.com/jsonrpc`
+- **Server card:** `https://mcp.gammarips.com/.well-known/mcp/server-card.json`
 - **Auth:** bearer-token tiering (Phase 2). Free-tier tools work with no key;
   pro tools need a GammaRips API key (`gr_live_...`) sent as
   `Authorization: Bearer <key>`. Currently in **shadow** rollout (nothing
@@ -77,10 +77,10 @@ realized receipts remain via `query_outcomes(view="positions")`.
 
 ```bash
 # Free tier (no key):
-claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp
+claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp
 
 # Pro (with your key):
-claude mcp add --transport http gammarips https://gammarips-mcp-406581297632.us-central1.run.app/mcp \
+claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp \
   --header "Authorization: Bearer gr_live_your_key"
 ```
 
@@ -94,7 +94,7 @@ Manual: Settings → MCP → Add new MCP server, or add to `.cursor/mcp.json`:
 {
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
+      "url": "https://mcp.gammarips.com/mcp",
       "headers": { "Authorization": "Bearer gr_live_your_key" }
     }
   }
@@ -111,7 +111,7 @@ MCP Servers → Remote Servers → Add, or add to `cline_mcp_settings.json`:
 {
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
+      "url": "https://mcp.gammarips.com/mcp",
       "type": "streamableHttp",
       "headers": { "Authorization": "Bearer gr_live_your_key" }
     }
@@ -127,7 +127,7 @@ Omit `headers` for the free tier (5 anon tools).
 {
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp"
+      "url": "https://mcp.gammarips.com/mcp"
     }
   }
 }

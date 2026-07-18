@@ -1,8 +1,8 @@
 {
   "name": "GammaRips",
   "description": "Options-flow intelligence primitives for AI agents: a hard-curated overnight candidate pool, point-in-time features, realized opportunity surfaces (MFE/MAE excursions), bracket outcome labels, and methodology playbooks. Your agent reasons to its own contract and exit — no pick endpoint. Paper-traded research data; educational only; not investment advice.",
-  "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp",
-  "legacy_sse_url": "https://gammarips-mcp-406581297632.us-central1.run.app/sse",
+  "url": "https://mcp.gammarips.com/mcp",
+  "legacy_sse_url": "https://mcp.gammarips.com/sse",
   "auth": {
     "type": "bearer",
     "header": "Authorization",

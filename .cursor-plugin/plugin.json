@@ -2,7 +2,7 @@
   "name": "gammarips",
   "displayName": "GammaRips Options Intelligence",
   "description": "Anti-firehose options-flow data for AI agents: curated daily pool, point-in-time features, realized MFE/MAE outcomes. No pick endpoint — your agent reasons to its own contract and exit. Educational research data, not investment advice.",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "author": { "name": "GammaRips" },
   "homepage": "https://gammarips.com/developers",
   "repository": "https://github.com/DevDizzle/gammarips-mcp",
@@ -20,7 +20,7 @@
   "logo": "assets/logo-400.png",
   "mcpServers": {
     "gammarips": {
-      "url": "https://gammarips-mcp-406581297632.us-central1.run.app/mcp"
+      "url": "https://mcp.gammarips.com/mcp"
     }
   },
   "skills": ["skills/gammarips-options-flow"]

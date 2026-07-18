@@ -1,7 +1,7 @@
 # Security & Trust Model — gammarips-mcp
 
 > **Last reviewed:** 2026-07-17 (V4 surface — 9 tools)
-> **Service URL:** `https://gammarips-mcp-406581297632.us-central1.run.app`
+> **Service URL:** `https://mcp.gammarips.com`
 > **Distribution:** public, unauthenticated (bearer-token tiers are Phase 2 of `docs/MCP-V3-SPEC.md`), listed on Smithery
 
 This document is the trust model for the GammaRips MCP server. It describes
