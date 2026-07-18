@@ -7,7 +7,7 @@
     "type": "bearer",
     "header": "Authorization",
     "scheme": "Bearer",
-    "note": "5 free-tier tools work without a key (get_pool, get_regime_context, get_market_calendar_status, get_playbook, get_daily_report). The 4 pro tools require a GammaRips API key (gr_live_...) sent as 'Authorization: Bearer <key>'. Enforcement rolls out via shadow->enforce; get a key at https://gammarips.com/pricing.",
+    "note": "5 free-tier tools work without a key (get_pool preview view, get_regime_context, get_market_calendar_status, get_playbook, get_daily_report). The 4 pro tools plus the full pool (get_pool enriched/raw/features, get_signal, get_liquidity, query_outcomes, replay_contract) require a GammaRips API key (gr_live_...) sent as 'Authorization: Bearer <key>'. Get a key at https://gammarips.com/pricing.",
     "pricing_url": "https://gammarips.com/pricing"
   },
   "tools": [
