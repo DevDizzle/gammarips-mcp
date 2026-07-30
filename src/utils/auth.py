@@ -36,8 +36,15 @@ from starlette.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "gr_live_"
-PRICING_URL = "https://gammarips.com/pricing"
-DEVELOPERS_URL = "https://gammarips.com/developers"
+# UTM-tagged: these URLs ship only inside the paywall denial envelope, and the
+# tag is what lets GA4 attribute pricing/account visits to MCP bounces.
+PRICING_URL = "https://gammarips.com/pricing?utm_source=mcp_denial"
+ACCOUNT_URL = "https://gammarips.com/account?utm_source=mcp_denial"
+DEVELOPERS_URL = "https://gammarips.com/developers?utm_source=mcp_denial"
+# Shown verbatim in the denial envelope. MUST match the live pricing page
+# (same-day price-sync rule): change here and in the webapp together.
+PRICE = "$39/month"
+TRIAL = "7-day free trial"
 
 # Rollout modes
 MODE_OFF = "off"
@@ -308,7 +315,14 @@ def meter(identity: Identity, tool: str, decision: str, mode: str) -> None:
 
 
 def denied_error(tool: str) -> dict:
-    """JSON-RPC error object for a tool a caller isn't entitled to."""
+    """JSON-RPC error object for a tool a caller isn't entitled to.
+
+    This envelope is the entire sales pitch for a paywall bounce: the caller is
+    an autonomous agent that relays it to a human operator. It must carry the
+    price, the trial, what Pro unlocks, and the exact next steps, in both prose
+    (message) and machine-legible form (data). Data-not-advice framing applies
+    here like everywhere else.
+    """
     # get_pool IS free at view="preview"; only the full pool is pro. Say so, so
     # a funnel agent knows the free entry point instead of just bouncing off.
     hint = (
@@ -320,15 +334,36 @@ def denied_error(tool: str) -> dict:
     return {
         "code": -32001,
         "message": (
-            hint + f"'{tool}' requires a GammaRips subscription. Subscribe and generate "
-            f"an API key at {PRICING_URL}, then send it as an Authorization: "
-            f"Bearer header."
+            hint
+            + f"'{tool}' requires GammaRips Pro ({PRICE}, {TRIAL}). Pro unlocks "
+            "the full curated overnight options-flow pool with point-in-time "
+            "features, historical opportunity/outcome surfaces, liquidity "
+            "checks, and contract replay. Data and tools, not advice. "
+            f"Next steps: start the trial at {PRICING_URL} , then generate an "
+            f"API key on your account page at {ACCOUNT_URL} (the key is shown "
+            "once), and send it as an Authorization: Bearer header. Setup "
+            f"docs: {DEVELOPERS_URL} . Relay this to your human operator."
         ),
         "data": {
             "code": "subscription_required",
             "tool": tool,
             "required_tier": "pro",
+            "price": PRICE,
+            "trial": TRIAL,
+            "includes": [
+                "full curated pool (enriched / raw / features views)",
+                "historical opportunity and outcome surfaces (query_outcomes)",
+                "per-contract liquidity checks (get_liquidity)",
+                "contract replay (replay_contract)",
+                "per-contract signal detail (get_signal)",
+            ],
+            "next_steps": [
+                f"Subscribe ({TRIAL}) at {PRICING_URL}",
+                f"Generate an API key at {ACCOUNT_URL} (shown once, copy it then)",
+                "Send the key as an 'Authorization: Bearer gr_live_...' header",
+            ],
             "pricing_url": PRICING_URL,
+            "account_url": ACCOUNT_URL,
             "developers_url": DEVELOPERS_URL,
         },
     }
