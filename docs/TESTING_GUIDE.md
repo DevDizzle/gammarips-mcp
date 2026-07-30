@@ -35,7 +35,7 @@ async def run_tests():
             print(f"Discovered {len(tools)} tools:")
             for tool in tools:
                 print(f"  - {tool.name}: {tool.description}")
-            print("\n" + "-"*20 + "\n")
+            print("\n" + "-" * 20 + "\n")
 
             # Test 1: get_winners_dashboard
             print("Testing get_winners_dashboard...")
@@ -43,18 +43,18 @@ async def run_tests():
                 "get_winners_dashboard", limit=3, option_type="CALL"
             )
             result = json.loads(result_json)
-            print(f"Found {result.get("count")} winners.")
+            print(f"Found {result.get('count')} winners.")
             print(json.dumps(result, indent=2))
-            print("\n" + "-"*20 + "\n")
+            print("\n" + "-" * 20 + "\n")
 
             # Test 2: get_options_signals for a specific ticker
             ticker = "AAPL"
             print(f"Testing get_options_signals for {ticker}...")
             result_json = await client.tools.call("get_options_signals", ticker=ticker)
             result = json.loads(result_json)
-            print(f"Found {result.get("count")} signals for {ticker}.")
+            print(f"Found {result.get('count')} signals for {ticker}.")
             print(json.dumps(result, indent=2))
-            print("\n" + "-"*20 + "\n")
+            print("\n" + "-" * 20 + "\n")
 
             # Test 3: get_stock_analysis
             ticker = "NVDA"
@@ -65,7 +65,7 @@ async def run_tests():
             result = json.loads(result_json)
             print(f"Successfully fetched analysis for {ticker}.")
             print(json.dumps(result, indent=2))
-            print("\n" + "-"*20 + "\n")
+            print("\n" + "-" * 20 + "\n")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -73,7 +73,6 @@ async def run_tests():
 
 if __name__ == "__main__":
     asyncio.run(run_tests())
-
 ```
 
 ### 1.2. Run the Test

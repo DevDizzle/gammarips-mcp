@@ -334,8 +334,7 @@ def denied_error(tool: str) -> dict:
     return {
         "code": -32001,
         "message": (
-            hint
-            + f"'{tool}' requires GammaRips Pro ({PRICE}, {TRIAL}). Pro unlocks "
+            hint + f"'{tool}' requires GammaRips Pro ({PRICE}, {TRIAL}). Pro unlocks "
             "the full curated overnight options-flow pool with point-in-time "
             "features, historical opportunity/outcome surfaces, liquidity "
             "checks, and contract replay. Data and tools, not advice. "

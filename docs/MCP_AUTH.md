@@ -38,16 +38,17 @@ Edit `src/auth/middleware.py`:
 # Change default collection
 self.users_collection = os.getenv("FIRESTORE_COLLECTION_USERS", "users")  # was "taas_users"
 
+
 # Update validation query to check isSubscribed field
 async def validate_api_key(self, api_key: str | None) -> dict:
     # ... existing code ...
-    
+
     user_data = user_doc.to_dict()
     user_data["user_id"] = user_doc.id
-    
+
     # Check subscription status (webapp uses isSubscribed boolean)
     is_subscribed = user_data.get("isSubscribed", False)
-    
+
     # Also check trial period (proUntil timestamp)
     pro_until = user_data.get("proUntil")
     in_trial = False
@@ -56,12 +57,10 @@ async def validate_api_key(self, api_key: str | None) -> dict:
             in_trial = pro_until.timestamp() > datetime.now().timestamp()
         except:
             pass
-    
+
     if not is_subscribed and not in_trial:
-        raise ValueError(
-            "Subscription required. Subscribe at gammarips.com/account"
-        )
-    
+        raise ValueError("Subscription required. Subscribe at gammarips.com/account")
+
     return user_data
 ```
 
@@ -214,20 +213,23 @@ Add API key extraction from headers:
 ```python
 from auth.middleware import auth_middleware
 
+
 # In request handler
 async def handle_request(request):
     # Extract API key from header
-    api_key = request.headers.get("X-API-Key") or request.headers.get("Authorization", "").replace("Bearer ", "")
-    
+    api_key = request.headers.get("X-API-Key") or request.headers.get("Authorization", "").replace(
+        "Bearer ", ""
+    )
+
     # Validate
     try:
         user_info = await auth_middleware.validate_api_key(api_key)
     except ValueError as e:
         return {"error": str(e)}, 401
-    
+
     # Track usage
     await auth_middleware.track_usage(user_info["user_id"], tool_name)
-    
+
     # Continue with request...
 ```
 
