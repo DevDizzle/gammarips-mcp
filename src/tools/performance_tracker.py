@@ -347,13 +347,9 @@ def get_position_history(
             # cohorts remain in the ledger under the same label (date-filter
             # resets since 2026-07-28). Floor the LIVE cohort by entry date.
             if policy_version == LIVE_POLICY_VERSION:
-                query += (
-                    " AND DATE(entry_timestamp, 'America/New_York') >= @cohort_start"
-                )
+                query += " AND DATE(entry_timestamp, 'America/New_York') >= @cohort_start"
                 query_params.append(
-                    bigquery.ScalarQueryParameter(
-                        "cohort_start", "DATE", LIVE_COHORT_START_DATE
-                    )
+                    bigquery.ScalarQueryParameter("cohort_start", "DATE", LIVE_COHORT_START_DATE)
                 )
                 cohort_floored = True
         query += """
@@ -413,9 +409,7 @@ def get_position_history(
                 # rather than importing a disowned cohort's skips.
                 skip_query += " AND scan_date >= @cohort_start"
                 skip_params.append(
-                    bigquery.ScalarQueryParameter(
-                        "cohort_start", "DATE", LIVE_COHORT_START_DATE
-                    )
+                    bigquery.ScalarQueryParameter("cohort_start", "DATE", LIVE_COHORT_START_DATE)
                 )
         skip_query += " ORDER BY scan_date DESC LIMIT 100"
         skip_days = [

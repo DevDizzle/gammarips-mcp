@@ -152,9 +152,7 @@ def get_historical_performance(
                     " AND DATE(entry_timestamp, 'America/New_York') >= @cohort_start"
                 )
                 params.append(
-                    bigquery.ScalarQueryParameter(
-                        "cohort_start", "DATE", LIVE_COHORT_START_DATE
-                    )
+                    bigquery.ScalarQueryParameter("cohort_start", "DATE", LIVE_COHORT_START_DATE)
                 )
                 cohort_floored = True
 
@@ -255,8 +253,7 @@ def get_historical_performance(
                 "cohort_start": cohort_start,
             },
             "note": (
-                "Returns are FRACTIONS of entry premium. Realized rows only. "
-                + _cohort_note()
+                "Returns are FRACTIONS of entry premium. Realized rows only. " + _cohort_note()
             ),
         }
 

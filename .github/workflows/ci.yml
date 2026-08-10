@@ -27,9 +27,19 @@ jobs:
         python-version: '3.12'
 
     - name: Install dependencies
+      # ruff is PINNED on purpose. It was unpinned, so CI installed whatever
+      # ruff had shipped that morning — and the formatter's line-joining
+      # behaviour changes between releases. That turns a green main red with no
+      # code change and with no way to reproduce it locally, which is how this
+      # repo earned commits like 8f1da3e ("style: ruff format (CI gate) — ...
+      # caught by newer ruff"). Keep this identical to the `ruff` pin in
+      # pyproject.toml [project.optional-dependencies].dev so that a local
+      # `ruff format .` produces byte-identical output to this gate.
+      # Bumping ruff is a deliberate act: move BOTH pins in one commit and run
+      # `ruff format .` in that same commit so the reformat lands with it.
       run: |
         python -m pip install --upgrade pip
-        pip install ruff pytest
+        pip install ruff==0.15.11 pytest
 
     - name: Format check with Ruff
       run: |

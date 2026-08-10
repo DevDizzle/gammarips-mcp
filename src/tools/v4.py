@@ -51,7 +51,6 @@ from tools.playbooks import get_playbook as _get_playbook_impl
 from tools.playbooks import list_playbooks as _list_playbooks_impl
 from tools.reports import get_daily_report as _get_daily_report_impl
 from tools.reports import get_report_list as _get_report_list_impl
-from utils.data import LIVE_POLICY_VERSION
 
 # get_regime_context is UNCHANGED — re-exported directly so it registers under
 # its own name with its own (already agent-facing) docstring/signature.
@@ -62,6 +61,7 @@ from tools.substrate import get_outcome_summary as _get_outcome_summary_impl
 from tools.substrate import get_pool_features as _get_pool_features_impl
 from tools.substrate import get_regime_context  # noqa: F401  (re-exported as a tool)
 from tools.substrate import query_outcomes as _query_outcomes_impl
+from utils.data import LIVE_POLICY_VERSION
 
 
 def _bad(param: str, value: Any, allowed: list[str]) -> dict[str, Any]:

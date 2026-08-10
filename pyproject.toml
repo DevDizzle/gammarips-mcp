@@ -21,7 +21,11 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
-    "ruff>=0.0.280",
+    # PINNED, and must match the ruff pin in .github/workflows/ci.yml. A range
+    # here meant a local `ruff format .` and the CI format gate could disagree
+    # about line joining, so a clean local tree still failed CI with no code
+    # change. Bump both in one commit, with the resulting reformat in it.
+    "ruff==0.15.11",
 ]
 
 [tool.pytest.ini_options]
