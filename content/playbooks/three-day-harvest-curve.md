@@ -21,7 +21,11 @@ target" intuition:
 
 **The one positive-EV lead: tournament picks** (N=24, all eras) — rule EV positive at
 every target ≥ +20 (+11% at +75/80), hold-to-window-end +10.3%, WR 54%. CIs vs pool span
-zero and V7.1-era N=2, so this is a lead to accrue toward N≥30, never load-bearing yet.
+zero, so this is a lead to accrue toward N≥30, never load-bearing yet. (The "V7.1-era
+N=2" figure previously quoted here was keyed on the policy LABEL alone; under the
+corrected cohort definition — label AND entry on/after 2026-08-10 — live-cohort N is 0.
+Anchor era claims to an explicit date range, never the bare label. See
+`get_playbook("changelog")`.)
 The mom_60 tilt's harvest lift failed walk-forward (regime) — consistent with
 [[mom-60-conditional-lever]]. Canonical exit-is-the-problem exhibit: a name that peaked
 +1,234% on day 3 while the live same-day exit realized −47.8% on the same path

@@ -51,6 +51,7 @@ from tools.playbooks import get_playbook as _get_playbook_impl
 from tools.playbooks import list_playbooks as _list_playbooks_impl
 from tools.reports import get_daily_report as _get_daily_report_impl
 from tools.reports import get_report_list as _get_report_list_impl
+from utils.data import LIVE_POLICY_VERSION
 
 # get_regime_context is UNCHANGED — re-exported directly so it registers under
 # its own name with its own (already agent-facing) docstring/signature.
@@ -270,7 +271,7 @@ def query_outcomes(
     rule: str = "bracket",
     trail_pct: float | None = None,
     activation_pct: float = 0,
-    policy_version: str | None = "V7_1_TILTED_GIGO",
+    policy_version: str | None = LIVE_POLICY_VERSION,
     min_premium_score: int | None = None,
 ) -> dict[str, Any]:
     """
@@ -307,7 +308,9 @@ def query_outcomes(
         (`policy_version`, default live). Over `days`, `limit`.
       * view="performance" — cohort AGGREGATE of the receipts over `days`
         (win rate, avg/median/best/worst), `direction`, `min_premium_score`,
-        `policy_version`.
+        `policy_version`. When the cohort has no closed trades, every aggregate
+        is `null` and `total_trades` is 0 — NEVER 0.0. A `null` here means "not
+        measured yet", not "zero percent"; do not render it as a result.
 
     All returns are FRACTIONS (0.40 = +40%). Realized data serves closed
     windows only. Paper-traded research data; not investment advice.
@@ -327,7 +330,17 @@ def query_outcomes(
         include_open: surface view — include not-yet-closed windows.
         targets / stops: harvest view — PERCENT grids.
         target_pct / stop_pct / rule / trail_pct / activation_pct: exit_rule view.
-        policy_version: positions/performance cohort filter ("all" for every era).
+        policy_version: positions/performance cohort filter. The live default
+            is the PAIR (policy label + cohort start date) — the label alone
+            does not define the cohort, since disowned cohorts remain in the
+            ledger under the same label. Responses carry `cohort_start`; a zero
+            row_count under the live cohort means it has not accrued closed
+            trades yet, not that there is no track record, and the aggregates
+            come back `null` rather than 0.0. Pass "all" for every era, but
+            note that "all" returns cohorts the engine has REPUDIATED — not
+            merely older exit mechanics — so it is not a track record and must
+            not be aggregated into one. Read the response `note` before
+            quoting any number from it.
         min_premium_score: performance view floor.
     """
     v = (view or "labels").strip().lower()

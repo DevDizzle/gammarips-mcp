@@ -2,6 +2,16 @@
 
 Dated record of changes that affect how you should interpret the data. Re-check this playbook periodically; it is the subscription's "what moved" feed.
 
+## 2026-08-10 — Live cohort RESET to 2026-08-10; receipts restart at zero (applied 2026-08-07)
+- **The receipts views return `total_trades: 0` / `row_count: 0` until the new cohort accrues closed trades.** That is a cohort reset, not missing data and not a zero win rate. Aggregate stats (`win_rate`, `avg_return`, `best`, `worst`) come back `null` at N=0 — deliberately NOT `0.0`, because an invented zero is worse than an absent number.
+- **The cohort is a PAIR, not a label.** It is `policy_version='V7_1_TILTED_GIGO'` **AND** entry on/after `2026-08-10`. Responses now carry a `cohort_start` field. The ledger keeps earlier cohorts under the same policy label, because resets since 2026-07-28 are date-filter resets rather than truncations — so filtering on the label alone silently mixes in disowned rows.
+- **Why the reset:** the engine found that the early-print liquidity floor introduced on 2026-07-29 had never actually fired. The options data vendor never returns a zero-volume day bar for a contract that has not traded today; it returns the PRIOR session's bar, so "yesterday's total volume" was read as "prints so far this morning". Two picks in the 2026-07-29 cohort were selected on a phantom liquidity count. The engine fixed the read, disowned that cohort, and restarted.
+- **`policy_version="all"` now warns you.** It still reaches every era, but those rows include cohorts the engine has repudiated. Do not aggregate them into a single track record.
+- Realized-only still applies: a trade appears the day AFTER it exits, so these views read one session behind the engine's own public panel.
+
+## 2026-07-29 — Cohort reset: tournament liquidity upgrade — SUPERSEDED
+- Cohort restarted at entry 2026-07-29 for a two-tier print / open-interest slate floor and a liquidity-aware judge prompt. **Superseded 2026-08-10 (see above):** that cohort's primary floor never fired, and the cohort is disowned.
+
 ## 2026-07-17 — v4: 9-tool consolidation + methodology corpus
 - The surface consolidated from ~29 tools to **9**. Older tool names are now `view=`/`granularity=` modes on the 9:
   - pool reads → `get_pool(view="enriched"|"raw"|"features"|"preview")` — `preview` is free; `enriched`/`raw`/`features` need an active key.
@@ -31,8 +41,8 @@ Full context in `get_playbook("exit-lab")`. One regime arc so far — these re-r
 - Live-pool tools now serve a leakage-safe view (forward-outcome columns physically stripped).
 - `get_enriched_signal_schema` now returns the full machine-readable column classification (feature/label/opportunity/telemetry/identity + as-of boundaries).
 
-## 2026-06-26 — V7.1 "Tilted GIGO" cohort live
-- Live paper-cohort policy: same-day bracket — enter 10:00 ET, +40% target / −30% stop, flat 15:45 ET, no overnight hold. This is the current same-day cohort; receipts before this date belong to earlier policies and are not comparable.
+## 2026-06-26 — V7.1 "Tilted GIGO" cohort live — SUPERSEDED
+- Live paper-cohort policy: same-day bracket — enter 10:00 ET, +40% target / −30% stop, flat 15:45 ET, no overnight hold. The **exit mechanics above are still current**; only the cohort boundary moved. **Superseded as a cohort start twice — 2026-07-29, then 2026-08-10 (current).** Receipts before 2026-08-10 belong to disowned or earlier cohorts and are not the live track record.
 - Selection unchanged (randomized bracket tournament over the BULLISH pool) plus a 60-day-momentum pre-rank tilt.
 
 ## 2026-06-25 — Live open-interest floor at selection

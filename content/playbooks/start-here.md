@@ -8,7 +8,7 @@ GammaRips is an overnight options-flow intelligence engine. Every trading mornin
 - **Realized labels** — how every pool contract resolved under two reference brackets: the live same-day GIGO bracket and a 3-day companion (`query_outcomes`, `get_outcome_summary`).
 - **Exit exploration** — score *your* bracket against the surface (`estimate_exit_rule`).
 - **Regime + safety context** — `get_regime_context`, `get_market_calendar_status`.
-- **Receipts** — the engine's own paper-traded track record, realized rows only (`get_position_history`, `get_historical_performance`).
+- **Receipts** — the engine's own paper-traded track record, realized rows only (`get_position_history`, `get_historical_performance`). The live cohort was RESET on 2026-08-10, so expect near-zero N for now: `total_trades: 0` with `null` aggregates means "not accrued yet", not a 0% win rate. See `get_playbook("changelog")`.
 - **Methodology** — these playbooks, versioned server-side.
 
 **What this server will never do:**

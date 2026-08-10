@@ -14,6 +14,8 @@ from __future__ import annotations
 import sys
 from datetime import date, timedelta
 
+from utils.data import LIVE_POLICY_VERSION
+
 # Columns the win-tracker writes back upstream — must NEVER appear in any
 # live-pool tool response (the safe view strips them).
 FORWARD_OUTCOME_COLS = {
@@ -876,7 +878,11 @@ def run_all() -> list[tuple[str, str]]:
                 _fail(
                     "query_outcomes[positions]", f"non-realized row leaked: {r['exit_timestamp']}"
                 )
-            if r["policy_version"] != "V7_1_TILTED_GIGO":
+            # NOTE: as a COHORT guard this assertion is vacuous — disowned
+            # cohorts carry the same policy label, which is how the pre-2026-08-07
+            # leak went unnoticed here. Real cohort cover (entry-date floor) lives
+            # in tests/test_cohort_filter.py. Kept as a cheap label smoke check.
+            if r["policy_version"] != LIVE_POLICY_VERSION:
                 _fail("query_outcomes[positions]", f"cohort mix: {r['policy_version']}")
         if "skip_days" not in out:
             _fail("query_outcomes[positions]", "skip_days missing from response")

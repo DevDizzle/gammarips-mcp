@@ -45,7 +45,13 @@ live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
   `harvest` (touch-probability curve), `exit_rule` (score YOUR bracket/trailing
   rule), `signal_performance` / `win_rate` (UNDERLYING-direction, **not** option
   PnL), `positions` / `performance` (the engine's realized paper-trade receipts,
-  cohort-filtered, default live `V7_1_TILTED_GIGO`).
+  cohort-filtered). The live cohort is the **pair** `V7_1_TILTED_GIGO` **and**
+  entry on/after `cohort_start` (2026-08-10), which responses now carry — the
+  policy label ALONE does not define the cohort, because the ledger retains
+  disowned cohorts under that same label. Right after a reset the live cohort
+  is legitimately empty: `total_trades: 0` with `null` aggregates means "has not
+  accrued closed trades yet", NOT "0% win rate". `policy_version="all"` reaches
+  every era but includes cohorts the engine has disowned — not a track record.
 - `replay_contract` **(pro)** — raw price tape for your own exit rule:
   `granularity="minute"` (intraday path + exact first-crossing; default) or
   `"day"` (daily OHLCV mark series). This server does not simulate exits.

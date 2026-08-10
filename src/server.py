@@ -38,7 +38,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SERVER_VERSION = "4.0.0"
+# 4.1.0 (2026-08-07): the live cohort is now the PAIR (policy label, start date);
+# `cohort_start` added to the positions/performance responses; aggregate stats are
+# null (never 0.0) at N=0. Minor-bumped so consumers can detect the semantics change.
+SERVER_VERSION = "4.1.0"
 
 # Initialize FastMCP server
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))

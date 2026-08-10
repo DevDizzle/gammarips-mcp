@@ -22,14 +22,17 @@ from typing import Any
 from google.cloud import bigquery
 
 from utils.data import BQ as client
-from utils.data import FORWARD_PAPER_LEDGER, SIGNAL_PERFORMANCE_TABLE
+from utils.data import (
+    DISOWNED_COHORT_NOTE,
+    FORWARD_PAPER_LEDGER,
+    LIVE_COHORT_NOTE,
+    LIVE_COHORT_START_DATE,
+    LIVE_POLICY_VERSION,
+    SIGNAL_PERFORMANCE_TABLE,
+)
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
-
-# The live paper-cohort policy label. Earlier cohorts used different exit
-# mechanics — mixing them in one aggregate produces nonsense.
-LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
 
 _UNDERLYING_UNIVERSE_NOTE = (
     "UNDERLYING-STOCK directional outcomes (~30 enriched signals/day, 3-day "
@@ -277,16 +280,20 @@ def get_position_history(
     selection. No-trade days are reported separately in `skip_days` (they are
     part of the honest track record); invalid-liquidity rows are excluded.
 
-    Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-06-26): enter 10:00 ET
+    Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-08-10): enter 10:00 ET
     the day after scan, +40% target / -30% stop, flat 15:45 ET same day.
-    Earlier policy_version cohorts used different exits — do not mix cohorts
+    Earlier policy_version cohorts used different exits AND include cohorts the
+    engine has since repudiated — do not mix cohorts
     when computing aggregates.
 
     Args:
         days: Lookback window in days (default 30, clamped 1-365).
         limit: Max rows (default 50, clamped 1-200).
-        policy_version: Cohort filter (default = the live cohort). Pass "all"
-            to see every era — comparison across eras is on you.
+        policy_version: Cohort filter (default = the live cohort, which is the
+            PAIR of policy label AND entry >= LIVE_COHORT_START_DATE — the
+            label alone does not define it). Pass "all" to reach every era, but
+            "all" includes cohorts the engine has REPUDIATED, not merely
+            different exit mechanics; it is not a track record.
 
     Returns:
         {policy_version, row_count, rows: [{scan_date, ticker, direction,
@@ -324,11 +331,31 @@ def get_position_history(
         query_params = [
             bigquery.ScalarQueryParameter("days", "INTEGER", days),
         ]
+        cohort_floored = False
+        # Normalize first (see historical.py): a case-variant of the live label
+        # would otherwise skip the date floor and then match zero rows.
+        pv = policy_version.strip() if policy_version else policy_version
+        if pv and pv.casefold() == LIVE_POLICY_VERSION.casefold():
+            pv = LIVE_POLICY_VERSION
+        policy_version = pv
         if policy_version and policy_version.lower() != "all":
             query += " AND policy_version = @policy_version"
             query_params.append(
                 bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
             )
+            # The policy label alone does NOT define the cohort — disowned
+            # cohorts remain in the ledger under the same label (date-filter
+            # resets since 2026-07-28). Floor the LIVE cohort by entry date.
+            if policy_version == LIVE_POLICY_VERSION:
+                query += (
+                    " AND DATE(entry_timestamp, 'America/New_York') >= @cohort_start"
+                )
+                query_params.append(
+                    bigquery.ScalarQueryParameter(
+                        "cohort_start", "DATE", LIVE_COHORT_START_DATE
+                    )
+                )
+                cohort_floored = True
         query += """
             ORDER BY exit_timestamp DESC
             LIMIT @limit
@@ -347,11 +374,29 @@ def get_position_history(
 
         # Skip days are the honesty signal for fail-closed days (regime rail,
         # no candidates) — surface them alongside the trades, past days only.
+        #
+        # SAME-DAY GUARD (2026-08-07). `scan_date < CURRENT_DATE` was NOT
+        # sufficient: the trader writes a skip row on the ENTRY morning, and
+        # entry_day is the trading day AFTER scan_date. So a row with
+        # scan_date = the previous trading day passes that test and reveals
+        # that the engine is flat TODAY, at ~10:00 ET. That is a same-day read
+        # on the operator's live position state. It is not a pick, so it never
+        # breached the letter of the no-same-day-pick guarantee, but it leaks
+        # the complement of one and it was an accident rather than a decision.
+        #
+        # Skip rows have no entry_timestamp to compare, and calendar-day
+        # arithmetic breaks across weekends and holidays (a Friday scan's entry
+        # is Monday). So gate on the LEDGER's own clock instead: the trader
+        # writes a row every trading day, so MAX(scan_date) is always the scan
+        # whose entry day is today. Showing strictly older scans hides exactly
+        # today's state, with no trading calendar required. Before the trader
+        # has run on a given day this is conservative by one session, which is
+        # the safe direction.
         skip_query = f"""
             SELECT CAST(scan_date AS STRING) AS scan_date, skip_reason
             FROM {FORWARD_PAPER_LEDGER}
             WHERE IFNULL(is_skipped, FALSE) = TRUE
-              AND scan_date < CURRENT_DATE('America/New_York')
+              AND scan_date < (SELECT MAX(scan_date) FROM {FORWARD_PAPER_LEDGER})
               AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)
         """
         skip_params = [bigquery.ScalarQueryParameter("days", "INTEGER", days)]
@@ -360,6 +405,18 @@ def get_position_history(
             skip_params.append(
                 bigquery.ScalarQueryParameter("policy_version", "STRING", policy_version)
             )
+            if policy_version == LIVE_POLICY_VERSION:
+                # Skipped rows have no entry_timestamp (no entry happened), so
+                # the cohort floor lands on scan_date. That is conservative by
+                # at most one boundary scan (the scan whose entry WOULD have
+                # been cohort_start), which errs toward showing fewer skip days
+                # rather than importing a disowned cohort's skips.
+                skip_query += " AND scan_date >= @cohort_start"
+                skip_params.append(
+                    bigquery.ScalarQueryParameter(
+                        "cohort_start", "DATE", LIVE_COHORT_START_DATE
+                    )
+                )
         skip_query += " ORDER BY scan_date DESC LIMIT 100"
         skip_days = [
             dict(row)
@@ -370,6 +427,7 @@ def get_position_history(
 
         return {
             "policy_version": policy_version or "all",
+            "cohort_start": LIVE_COHORT_START_DATE if cohort_floored else None,
             "row_count": len(rows),
             "rows": rows,
             "skip_days": skip_days,
@@ -378,7 +436,15 @@ def get_position_history(
                 "realized_return_pct is a FRACTION of entry premium. skip_days "
                 "lists no-trade days (fail-closed regime rail, no candidates) — "
                 "they are part of the honest track record. "
-                "Paper-traded. Not investment advice."
+                + (
+                    f"{LIVE_COHORT_NOTE} A row_count of 0 means the cohort has "
+                    "not accrued closed trades yet, NOT that there is no track "
+                    "record. skip_days is floored on scan_date, so it begins one "
+                    "session after cohort_start — do not use it as the "
+                    "cohort's trading-day denominator on day one."
+                    if cohort_floored
+                    else DISOWNED_COHORT_NOTE
+                )
             ),
         }
 
