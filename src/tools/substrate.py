@@ -171,6 +171,9 @@ def get_opportunity_surface(
     ticker: str | None = None,
     days: int = 30,
     include_open: bool = False,
+    aggregate_only: bool = False,
+    delta_min: float | None = None,
+    delta_max: float | None = None,
 ) -> dict[str, Any]:
     """
     The OPPORTUNITY SURFACE — per-contract realized excursions of the option
@@ -201,60 +204,446 @@ def get_opportunity_surface(
         days: Lookback window in days when scan_date is not given
             (default 30, clamped 1-120).
         include_open: Include rows whose excursion window has not closed yet
-            (opp_status != 'OK'; their MFE/MAE columns are NULL/partial).
+            (opp_status != 'OK'). Every opp_* VALUE column (peak/trough/minutes/
+            bar_count/entry price and timestamp) is NULL on those rows, never
+            partial, so they contribute to `n` but to no statistic — `aggregate`
+            reports `n_with_surface` separately for that reason. Note that
+            `opp_window_days` and `opp_sim_version` ARE populated while open, so
+            they cannot be used to test whether a window has closed.
+        aggregate_only: Return MFE/MAE quantiles over the filtered set instead
+            of rows. This is the only mode that sees the WHOLE window — the row
+            mode is capped at MAX_RESPONSE_ROWS and truncates oldest-first.
+        delta_min / delta_max: filter on ABS(recommended_delta) (the delta
+            band), clamped to [0, 1]. NULL-delta rows cannot satisfy either
+            bound and are excluded; the count is reported as
+            `excluded_null_delta` rather than silently dropped.
 
     Returns:
-        {row_count, rows: [...], meta: {statuses_included, note}}
+        {row_count, matched_rows, truncated, rows: [...], meta: {...}}
+        or, with aggregate_only: {aggregate: {...}, meta: {...}}.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
 
     days = clamp(days, 1, 120, default=30)
 
+    # Validate the band before it reaches SQL. Unvalidated bounds silently match
+    # zero rows (NaN compares false against everything, and an inverted band is
+    # empty by construction), which on this tool would read as "no opportunity
+    # in your band" rather than "you passed a bad band".
+    # NOTE: `clamp` from utils.safety is int-by-contract (`int(value)`), so it
+    # collapses 0.20 to 0 and would silently destroy the band. Deltas need a
+    # float clamp; do not "simplify" this back to clamp().
+    def _delta_bound(v: float | None, name: str) -> float | None:
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a number, got {v!r}") from None
+        if math.isnan(f) or math.isinf(f):
+            raise ValueError(f"{name} must be finite, got {v!r}")
+        return max(0.0, min(1.0, f))
+
     try:
+        delta_min = _delta_bound(delta_min, "delta_min")
+        delta_max = _delta_bound(delta_max, "delta_max")
+    except ValueError as e:
+        return {"error": str(e)}
+    if delta_min is not None and delta_max is not None and delta_min > delta_max:
+        return {"error": f"delta_min ({delta_min}) must be <= delta_max ({delta_max})"}
+
+    try:
+        # Two filter scopes. `window_filters` is the DATE window alone and is
+        # what the frontier block uses: pipeline liveness is not a function of
+        # a feature-value filter, and computing the frontier under a narrow
+        # delta band would let an empty band masquerade as a lagging frontier —
+        # the exact misdiagnosis this block exists to prevent, reintroduced
+        # through its own fix. `filters` adds the row-selection predicates.
+        window_filters: list = []
+        filters = ["TRUE"]
+        params: list = []
+        if scan_date:
+            window_filters.append("scan_date = @scan_date")
+            params.append(bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date))
+        else:
+            window_filters.append(
+                "scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)"
+            )
+            params.append(bigquery.ScalarQueryParameter("days", "INTEGER", days))
+        filters += window_filters
+        if ticker:
+            filters.append("ticker = @ticker")
+            params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
+        # Band predicates live in their OWN list so the excluded_null_delta
+        # count can subtract them structurally. Recovering them by substring
+        # ("recommended_delta" not in f) works only while nothing else in
+        # `filters` mentions the column, and silently over-counts the moment
+        # something does.
+        band_filters: list = []
+        if delta_min is not None:
+            band_filters.append("ABS(recommended_delta) >= @dmin")
+            params.append(bigquery.ScalarQueryParameter("dmin", "FLOAT64", float(delta_min)))
+        if delta_max is not None:
+            band_filters.append("ABS(recommended_delta) <= @dmax")
+            params.append(bigquery.ScalarQueryParameter("dmax", "FLOAT64", float(delta_max)))
+        filters += band_filters
+        # Keep the status predicate separate: the frontier block below has to
+        # see the rows the status filter removes, or it cannot tell the caller
+        # WHY the newest scan_date is where it is.
+        where_base = " AND ".join(filters)
+        where = where_base + ("" if include_open else " AND opp_status = 'OK'")
+        where_window = " AND ".join(window_filters) or "TRUE"
+
+        def _cfg() -> bigquery.QueryJobConfig:
+            # A fresh config per query, matching every other function in this
+            # module. A QueryJob holds a reference to the config's `_properties`
+            # rather than a copy, so a shared instance aliases across jobs and
+            # only survives because the calls happen to be sequential.
+            return bigquery.QueryJobConfig(query_parameters=params)
+
+        # EXPLAIN THE FRONTIER (2026-08-10). max(scan_date) on this view lags
+        # today by the excursion window, and twice now the primary consumer has
+        # read that lag as a stopped job and escalated it (GAP-015 on 08-05,
+        # GAP-019 on 08-10). Both times the answer was "the window has not
+        # closed yet" and both times the response payload gave them nothing to
+        # see that with: the missing dates are simply absent, and absent looks
+        # identical to broken. The 08-05 reply promised a status relabel here
+        # and it was never shipped, so the same misdiagnosis cost a second
+        # round trip. Name the open dates in the response instead.
+        # IT MUST VERIFY THE CLAIM, NOT ASSERT IT. `WINDOW_OPEN` does not mean
+        # "the window is open now" — it means the window had not closed AT LABEL
+        # TIME, and a row keeps that status forever if the fill job never
+        # revisits it. That is not hypothetical: FINDINGS_LEDGER records the
+        # opportunity-surface labeler STALLED from 2026-06-26, leaving 950 rows
+        # (24.1%) WINDOW_OPEN although every window had closed. A block that
+        # hardcodes "this is not a stalled job" would have told the paying
+        # consumer, inside the product payload, that a dark surface was fine.
+        # So: derive whether each pending row's window SHOULD have closed, and
+        # only reassure when none is past due.
+        #   * The session calendar is the table's own DISTINCT entry_day values
+        #     (the engine emits a pool every trading day), so no new dependency
+        #     and no hardcoded holiday list. If that calendar is itself stale,
+        #     `open_past_due` is reported as NULL (unknown), never as zero.
+        #   * Closure predicate mirrors the producer's
+        #     (`get_nth_next_trading_day(entry_day, n-1) < today_et`): a window
+        #     is closed once `opp_window_days - 1` sessions have elapsed strictly
+        #     between entry_day and today.
+        #   * PENDING means WINDOW_OPEN or NULL — the same definition the
+        #     engine's own dbt freshness test uses. Terminal statuses (NO_BARS,
+        #     NO_POST_ENTRY_BARS, ERROR, ...) are resolved-as-unusable, not a
+        #     stall, and are reported in the histogram instead of as past-due.
+        #   * Scoped to the DATE WINDOW only, never the delta/ticker filters.
+        # Fail-soft: this block is explanatory. If it fails, the tool still
+        # answers, matching the fail-soft convention used elsewhere in this
+        # module and the non-blocking benchmark_context invariant in the engine.
+        frontier: dict[str, Any] = {}
+        try:
+            frontier_row = next(
+                iter(
+                    client.query(
+                        f"""
+                        WITH sessions AS (
+                          SELECT DISTINCT entry_day AS d
+                          FROM {_OUTCOMES_TABLE}
+                          WHERE entry_day IS NOT NULL
+                            AND entry_day >= (
+                              SELECT MIN(entry_day) FROM {_OUTCOMES_TABLE}
+                              WHERE {where_window}
+                            )
+                        ), cal AS (
+                          -- A HOLE in the calendar is the unsafe direction: each
+                          -- missing session undercounts elapsed sessions by one,
+                          -- flips window_closed to false, drops rows out of
+                          -- open_past_due, and routes to the reassuring branch.
+                          -- The engine does not trust this pipeline to be
+                          -- gap-free either (digest.py ships a coverage grid
+                          -- precisely because mid-window holes happen), so do
+                          -- not claim "verified" on top of an assumption it
+                          -- refuses to make. Any gap longer than the longest US
+                          -- market closure makes the calendar unusable.
+                          SELECT MAX(d) AS max_session,
+                                 MAX(DATE_DIFF(d, prev_d, DAY)) AS max_gap
+                          FROM (SELECT d, LAG(d) OVER (ORDER BY d) AS prev_d FROM sessions)
+                        ), scoped AS (
+                          SELECT
+                            o.scan_date,
+                            o.opp_status,
+                            (o.opp_status IS NULL OR o.opp_status = 'WINDOW_OPEN') AS pending,
+                            (
+                              SELECT COUNT(*) FROM sessions s
+                              WHERE s.d > o.entry_day
+                                AND s.d < CURRENT_DATE('America/New_York')
+                            ) >= IFNULL(o.opp_window_days, 3) - 1 AS window_closed
+                          FROM {_OUTCOMES_TABLE} o
+                          WHERE {where_window}
+                        )
+                        SELECT
+                          MAX(IF(opp_status = 'OK', scan_date, NULL)) AS closed_frontier,
+                          MAX(scan_date) AS newest_scan_date,
+                          COUNT(DISTINCT IF(pending, scan_date, NULL)) AS pending_scan_dates,
+                          MIN(IF(pending, scan_date, NULL)) AS first_pending_scan_date,
+                          COUNTIF(pending AND window_closed) AS open_past_due,
+                          (SELECT max_session FROM cal) AS calendar_max_session,
+                          (SELECT max_gap FROM cal) AS calendar_max_gap_days,
+                          -- NULL-safe and defaults UNUSABLE. An empty calendar
+                          -- makes MAX(d) NULL, and a NULL here must never read
+                          -- as "fine".
+                          IFNULL(
+                            (SELECT max_session FROM cal)
+                              < DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL 5 DAY)
+                            OR IFNULL((SELECT max_gap FROM cal), 0) > 4,
+                            TRUE
+                          ) AS calendar_unusable,
+                          ARRAY(
+                            SELECT AS STRUCT IFNULL(opp_status, '(null)') AS status,
+                                             COUNT(*) AS n
+                            FROM scoped GROUP BY 1 ORDER BY 1
+                          ) AS _statuses
+                        FROM scoped
+                        """,
+                        job_config=_cfg(),
+                    ).result()
+                ),
+                None,
+            )
+            if frontier_row is not None:
+                frontier = _serialize(dict(frontier_row))
+                # Full status histogram, NULL included. A WINDOW_OPEN-only count
+                # is blind to the outage signature the engine's dbt test keys on
+                # (NULL status), so an all-NULL date would produce a lagging
+                # frontier with no explanation at all.
+                frontier["status_counts"] = {
+                    s["status"]: s["n"] for s in (frontier.pop("_statuses", None) or [])
+                }
+
+                cal_max = frontier.get("calendar_max_session")
+                past_due = frontier.get("open_past_due")
+                # An unusable session calendar (stale at the max, holed in the
+                # middle, or empty) cannot support a "nothing is overdue" claim,
+                # so downgrade to unknown rather than reassure. Defaults to
+                # UNUSABLE when absent: "could not determine" must never render
+                # as "fine".
+                if frontier.pop("calendar_unusable", True):
+                    frontier["open_past_due"] = None
+                    past_due = None
+
+                if past_due is None:
+                    frontier["note"] = (
+                        "Could not determine whether pending windows are overdue: the "
+                        f"session calendar is unusable (ends {cal_max}, largest gap "
+                        f"{frontier.get('calendar_max_gap_days')} days). Treat the "
+                        "frontier as UNVERIFIED, not as healthy."
+                    )
+                elif past_due > 0:
+                    frontier["note"] = (
+                        f"{past_due} pending row(s) have a window that SHOULD have closed "
+                        "and are still unlabeled. This looks like a stalled fill job, not "
+                        "a design lag. The affected scan dates will not fill on their own."
+                    )
+                elif frontier.get("pending_scan_dates"):
+                    # Suppress the frontier clause when nothing in scope is
+                    # closed (e.g. a single pending scan_date was requested):
+                    # "newer than the closed frontier (None)" is garbled.
+                    _cf = frontier.get("closed_frontier")
+                    _rel = f" newer than the closed frontier ({_cf})" if _cf else ""
+                    frontier["note"] = (
+                        f"{frontier['pending_scan_dates']} scan date(s){_rel} are pending, "
+                        f"starting {frontier.get('first_pending_scan_date')}. Verified: 0 "
+                        "of them are past due, so their excursion window genuinely has not "
+                        "closed and they will fill on their own. Pass include_open=True to "
+                        "see them; every opp_* VALUE column (peak/trough/minutes/bar_count/"
+                        "entry price and timestamp) is NULL until the window closes, though "
+                        "opp_window_days and opp_sim_version are populated."
+                    )
+        except Exception as e:  # noqa: BLE001 — explanatory block, never fatal
+            frontier = {"status": "unavailable", "error": safe_error(e, "frontier")}
+
+        _BASIS_NOTE = (
+            "Returns are FRACTIONS of the 10:00 ET entry cost basis "
+            "(entry-bar close + entry slippage; no exit slippage — this is "
+            "the raw achievable path). Realized excursion data: never use "
+            "as a selection feature for the same scan_date."
+        )
+
+        def _ok(col: str) -> str:
+            """Statistic guard: only closed windows carry excursion values."""
+            return f"IF(opp_status = 'OK', {col}, NULL)"
+
+        def _q(col: str, pct: int, alias: str) -> str:
+            return f"ROUND(APPROX_QUANTILES({_ok(col)}, 100)[OFFSET({pct})], 4) AS {alias}"
+
+        # A NULL delta cannot satisfy either bound, so banding silently shrinks
+        # the population. Report the size of that exclusion instead of letting a
+        # caller compare a banded aggregate against an unbanded one and find an
+        # unexplained denominator gap. Only costs a query when a band is passed.
+        # It MUST count over the population this call would otherwise have
+        # returned — same date window, same ticker, same status filter, minus
+        # only the delta predicates. Counting over the date window alone reports
+        # the NULL-delta total for every ticker in the lookback against an `n`
+        # of a handful of rows: a disclosure number that is wrong, and that
+        # reconciles perfectly against itself.
+        excluded_null_delta = 0
+        if band_filters:
+            where_no_delta = " AND ".join([f for f in filters if f not in band_filters]) + (
+                "" if include_open else " AND opp_status = 'OK'"
+            )
+            nd = next(
+                iter(
+                    client.query(
+                        f"SELECT COUNTIF(recommended_delta IS NULL) AS n "
+                        f"FROM {_OUTCOMES_TABLE} WHERE {where_no_delta}",
+                        job_config=_cfg(),
+                    ).result()
+                ),
+                None,
+            )
+            excluded_null_delta = int(nd.n) if nd else 0
+
+        if aggregate_only:
+            # Quantiles are computed in BigQuery over the FULL filtered set, so
+            # unlike the row mode below they are never silently truncated. This
+            # is the mode to use for exit design: the row cap exists to protect
+            # the transport, and a distribution fitted to whatever survived it
+            # is a distribution of the most recent dates and the biggest peaks.
+            # Every statistic below is guarded by opp_status='OK'. WINDOW_OPEN
+            # rows carry NULL in every opp_* VALUE column (never partial; the
+            # metadata columns opp_window_days/opp_sim_version ARE written), so
+            # with include_open=True an unguarded COUNT(*) would report an `n`
+            # that the quantiles were never fitted to — a sample overstating its
+            # own N under a note claiming completeness, which is the same defect
+            # class as the 200-row truncation this function exists to fix.
+            # `n` is the matched population; `n_with_surface` is what the
+            # statistics actually rest on. Read the second one.
+            agg_query = f"""
+                SELECT
+                    COUNT(*) AS n,
+                    COUNTIF(opp_status = 'OK') AS n_with_surface,
+                    COUNT(DISTINCT scan_date) AS distinct_scan_dates,
+                    MIN(scan_date) AS scan_date_min,
+                    MAX(scan_date) AS scan_date_max,
+                    ARRAY_AGG(DISTINCT {_ok("opp_sim_version")} IGNORE NULLS)
+                      AS opp_sim_versions,
+                    ROUND(AVG({_ok("opp_peak_return")}), 4) AS mfe_avg,
+                    {_q("opp_peak_return", 10, "mfe_p10")},
+                    {_q("opp_peak_return", 25, "mfe_p25")},
+                    {_q("opp_peak_return", 50, "mfe_p50")},
+                    {_q("opp_peak_return", 75, "mfe_p75")},
+                    {_q("opp_peak_return", 90, "mfe_p90")},
+                    ROUND(AVG({_ok("opp_trough_return")}), 4) AS mae_avg,
+                    {_q("opp_trough_return", 10, "mae_p10")},
+                    {_q("opp_trough_return", 25, "mae_p25")},
+                    {_q("opp_trough_return", 50, "mae_p50")},
+                    {_q("opp_trough_return", 75, "mae_p75")},
+                    {_q("opp_trough_return", 90, "mae_p90")},
+                    APPROX_QUANTILES({_ok("opp_minutes_to_peak")}, 100)[OFFSET(50)]
+                      AS minutes_to_peak_p50,
+                    APPROX_QUANTILES({_ok("opp_minutes_to_trough")}, 100)[OFFSET(50)]
+                      AS minutes_to_trough_p50
+                FROM {_OUTCOMES_TABLE}
+                WHERE {where}
+            """
+            agg_row = next(iter(client.query(agg_query, job_config=_cfg()).result()), None)
+            agg = _serialize(dict(agg_row)) if agg_row else {}
+            meta: dict[str, Any] = {
+                "statuses_included": "all" if include_open else "OK (closed windows only)",
+                "truncated": False,
+                "frontier": frontier,
+                "note": (
+                    "Aggregate over the FULL filtered set, not truncated. Statistics "
+                    "rest on `n_with_surface` (opp_status='OK'), not on `n`. "
+                    + _BASIS_NOTE
+                    + " "
+                    + _COMPOSITE_DISCLAIMER
+                ),
+            }
+            if excluded_null_delta:
+                meta["excluded_null_delta"] = excluded_null_delta
+            return {"aggregate": agg, "meta": meta}
+
         query = f"""
             SELECT
                 scan_date, entry_day, ticker, direction,
                 recommended_contract, recommended_strike, recommended_expiration,
-                recommended_dte,
+                recommended_dte, recommended_delta,
                 opp_entry_timestamp, opp_entry_price,
                 opp_peak_return, opp_trough_return,
                 opp_minutes_to_peak, opp_minutes_to_trough,
-                opp_bar_count, opp_window_days, opp_status, opp_sim_version
+                opp_bar_count, opp_window_days, opp_status, opp_sim_version,
+                -- Matched population carried on the rows themselves. A separate
+                -- COUNT query would read a DIFFERENT snapshot, so a concurrent
+                -- labeler MERGE between the two could yield matched < returned
+                -- and report `truncated: false` on a truncated response.
+                COUNT(*) OVER () AS _matched_rows
             FROM {_OUTCOMES_TABLE}
-            WHERE TRUE
+            WHERE {where}
+            ORDER BY scan_date DESC, opp_peak_return DESC
+            LIMIT {MAX_RESPONSE_ROWS}
         """
-        params: list = []
-        if scan_date:
-            query += " AND scan_date = @scan_date"
-            params.append(bigquery.ScalarQueryParameter("scan_date", "DATE", scan_date))
-        else:
-            query += (
-                " AND scan_date >= DATE_SUB(CURRENT_DATE('America/New_York'), INTERVAL @days DAY)"
+        rows = [_serialize(dict(r)) for r in client.query(query, job_config=_cfg()).result()]
+
+        # DISCLOSE THE CAP (2026-08-10). The row list is `ORDER BY scan_date
+        # DESC, opp_peak_return DESC LIMIT 200`, and it used to report only
+        # `row_count: len(rows)` — so a `days=30` request that matched 1,400
+        # rows came back as a tidy 200 with nothing saying 25 scan dates had
+        # been dropped. Worse than the missing volume: the cut lands MID-DATE,
+        # and because the secondary sort is peak DESC, the oldest returned
+        # scan_date contributes only its HIGHEST-MFE rows. A caller fitting
+        # quantiles to that gets a recency-truncated sample with an
+        # upward-biased tail, and every number in it reconciles perfectly.
+        # Prefer aggregate_only for any distribution; if you must have rows,
+        # `partial_scan_date` names the one date you have to drop first.
+        matched_rows = int(rows[0].pop("_matched_rows")) if rows else 0
+        for r in rows[1:]:
+            r.pop("_matched_rows", None)
+        truncated = matched_rows > len(rows)
+
+        # `partial_scan_date` is the date to drop. It is only meaningful when the
+        # cut actually lands mid-date: if every returned row shares ONE scan_date
+        # the cap fell inside a single pool, "drop it first" would empty the
+        # sample, and the honest instruction is to narrow the query instead.
+        partial_scan_date = None
+        if truncated and rows and rows[-1]["scan_date"] != rows[0]["scan_date"]:
+            partial_scan_date = rows[-1]["scan_date"]
+
+        note = _BASIS_NOTE
+        if truncated:
+            head = (
+                f"TRUNCATED: {matched_rows} rows matched, {len(rows)} returned "
+                f"(cap {MAX_RESPONSE_ROWS}). Rows are ordered scan_date DESC then "
+                "peak DESC. "
             )
-            params.append(bigquery.ScalarQueryParameter("days", "INTEGER", days))
-        if ticker:
-            query += " AND ticker = @ticker"
-            params.append(bigquery.ScalarQueryParameter("ticker", "STRING", ticker))
-        if not include_open:
-            query += " AND opp_status = 'OK'"
+            if partial_scan_date:
+                head += (
+                    f"The OLDEST returned scan_date ({partial_scan_date}) is a PARTIAL, "
+                    "highest-MFE-only slice: drop it before computing any distribution. "
+                )
+            else:
+                head += (
+                    "Every returned row shares one scan_date, so this is that pool's "
+                    "highest-MFE slice only, not the pool. Narrow the query. "
+                )
+            note = (
+                head + "Do not read this sample as the window you asked for; use "
+                "aggregate_only=True to summarize the full set. "
+            ) + _BASIS_NOTE
 
-        query += f" ORDER BY scan_date DESC, opp_peak_return DESC LIMIT {MAX_RESPONSE_ROWS}"
+        meta = {
+            "statuses_included": "all" if include_open else "OK (closed windows only)",
+            "row_cap": MAX_RESPONSE_ROWS,
+            "frontier": frontier,
+            "note": note,
+        }
+        if excluded_null_delta:
+            meta["excluded_null_delta"] = excluded_null_delta
 
-        job_config = bigquery.QueryJobConfig(query_parameters=params)
-        rows = [_serialize(dict(r)) for r in client.query(query, job_config=job_config).result()]
         return {
             "row_count": len(rows),
+            "matched_rows": matched_rows,
+            "truncated": truncated,
+            "partial_scan_date": partial_scan_date,
             "rows": rows,
-            "meta": {
-                "statuses_included": "all" if include_open else "OK (closed windows only)",
-                "note": (
-                    "Returns are FRACTIONS of the 10:00 ET entry cost basis "
-                    "(entry-bar close + entry slippage; no exit slippage — this is "
-                    "the raw achievable path). Realized excursion data: never use "
-                    "as a selection feature for the same scan_date."
-                ),
-            },
+            "meta": meta,
         }
 
     except Exception as e:

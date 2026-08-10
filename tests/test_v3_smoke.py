@@ -357,6 +357,124 @@ def run_all() -> list[tuple[str, str]]:
         _verify_surface,
     )
 
+    def _verify_surface_truncation(out):
+        """Row mode must DECLARE the 200-row cap. It used to report only
+        row_count, so a days=30 pull silently returned the newest ~4 scan dates
+        out of ~17 and, because the sort is peak DESC, the oldest returned date
+        contributed only its highest-MFE rows: median MFE inflated 46%."""
+        for k in ("matched_rows", "truncated", "partial_scan_date"):
+            if k not in out:
+                _fail("query_outcomes[surface]", f"missing truncation key {k}")
+        if out["matched_rows"] < out["row_count"]:
+            _fail("query_outcomes[surface]", "matched_rows < row_count")
+        if out["truncated"] != (out["matched_rows"] > out["row_count"]):
+            _fail("query_outcomes[surface]", "truncated flag disagrees with counts")
+        if out["truncated"] and "TRUNCATED" not in out["meta"]["note"]:
+            _fail("query_outcomes[surface]", "truncated response does not say so in its note")
+        if any("_matched_rows" in r for r in out["rows"]):
+            _fail("query_outcomes[surface]", "internal _matched_rows leaked into rows")
+        return f"(matched {out['matched_rows']}, returned {out['row_count']})"
+
+    check(
+        "query_outcomes[surface,truncation-disclosed]",
+        lambda: query_outcomes(view="surface", days=30),
+        _verify_surface_truncation,
+    )
+
+    def _verify_surface_agg(out):
+        agg, meta = out.get("aggregate") or {}, out.get("meta") or {}
+        if not agg or "rows" in out:
+            _fail("query_outcomes[surface,agg]", "aggregate_only returned rows or no aggregate")
+        # n is the matched population; the statistics rest on n_with_surface.
+        # WINDOW_OPEN rows carry NULL in every opp_* VALUE column, so an
+        # unguarded COUNT(*) would report an n the quantiles were never fitted
+        # to. (opp_window_days / opp_sim_version ARE populated while open.)
+        if agg.get("n_with_surface") is None:
+            _fail("query_outcomes[surface,agg]", "aggregate omits n_with_surface")
+        if agg["n_with_surface"] > agg["n"]:
+            _fail("query_outcomes[surface,agg]", "n_with_surface exceeds n")
+        if "Not investment advice." not in meta.get("note", ""):
+            _fail("query_outcomes[surface,agg]", "aggregate ships without composite disclaimer")
+        if not agg.get("opp_sim_versions"):
+            _fail("query_outcomes[surface,agg]", "aggregate does not pin opp_sim_version")
+        return f"(n={agg['n']} surface={agg['n_with_surface']})"
+
+    check(
+        "query_outcomes[surface,aggregate_only]",
+        lambda: query_outcomes(view="surface", days=30, aggregate_only=True),
+        _verify_surface_agg,
+    )
+
+    def _verify_surface_frontier(out):
+        """The frontier block must VERIFY liveness, never assert it. A row keeps
+        WINDOW_OPEN forever if the fill job stops (the 2026-06-26 stall left 950
+        rows open though every window had closed), so the reassuring note is
+        only legal when open_past_due == 0."""
+        f = (out.get("meta") or {}).get("frontier") or {}
+        if f.get("status") == "unavailable":
+            return "(frontier unavailable, failed soft)"
+        if "open_past_due" not in f:
+            _fail("query_outcomes[surface]", "frontier does not check past-due windows")
+        if not f.get("status_counts"):
+            _fail("query_outcomes[surface]", "frontier lacks full status histogram")
+        reassures = "will fill on their own" in (f.get("note") or "")
+        if reassures and f.get("open_past_due") != 0:
+            _fail("query_outcomes[surface]", "frontier reassures while rows are past due")
+        return f"(frontier {f.get('closed_frontier')}, past_due={f.get('open_past_due')})"
+
+    check(
+        "query_outcomes[surface,frontier-verified]",
+        lambda: query_outcomes(view="surface", days=30, aggregate_only=True),
+        _verify_surface_frontier,
+    )
+
+    def _verify_surface_delta(out):
+        """utils.safety.clamp is int-by-contract, so routing delta bounds
+        through it collapses 0.20 to 0 and silently empties the band."""
+        agg = out.get("aggregate") or {}
+        if not agg.get("n"):
+            _fail("query_outcomes[surface,delta]", "delta band matched 0 rows (int-clamp bug?)")
+        bad = query_outcomes(view="surface", days=30, delta_min=0.8, delta_max=0.2)
+        if not bad.get("error"):
+            _fail("query_outcomes[surface,delta]", "inverted delta band was not rejected")
+        # excluded_null_delta must be scoped to THIS call's population, not to
+        # the bare date window. A ticker-scoped call reporting the whole
+        # lookback's NULL-delta total is a disclosure number that is wrong and
+        # that reconciles perfectly against itself.
+        wide = query_outcomes(
+            view="surface", days=30, aggregate_only=True, delta_min=0.20, delta_max=0.46
+        )
+        narrow = query_outcomes(
+            view="surface",
+            days=30,
+            aggregate_only=True,
+            ticker="NVDA",
+            delta_min=0.20,
+            delta_max=0.46,
+        )
+        w = (wide.get("meta") or {}).get("excluded_null_delta", 0)
+        nrw = (narrow.get("meta") or {}).get("excluded_null_delta", 0)
+        # STRICT, and only meaningful when the window actually has NULL deltas.
+        # `nrw > w` alone is vacuous: a regression to the date-window-scoped
+        # count makes both numbers identical, so the check would pass against
+        # the exact defect it names. Equal counts are only legitimate when the
+        # population has no NULL deltas at all.
+        if w > 0 and nrw >= w:
+            _fail(
+                "query_outcomes[surface,delta]",
+                f"excluded_null_delta ignores the ticker filter (narrow {nrw} >= wide {w})",
+            )
+        scoped = "n/a (no NULL deltas in window)" if w == 0 else f"{nrw}<{w}"
+        return f"(band n={agg['n']}, inverted rejected, null-delta {scoped})"
+
+    check(
+        "query_outcomes[surface,delta-band]",
+        lambda: query_outcomes(
+            view="surface", days=30, aggregate_only=True, delta_min=0.20, delta_max=0.46
+        ),
+        _verify_surface_delta,
+    )
+
     def _verify_outcomes(out):
         rows = out["rows"]
         if not rows:

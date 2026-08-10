@@ -291,7 +291,12 @@ def query_outcomes(
         day_of_week|moneyness_bucket.
       * view="surface" — the OPPORTUNITY SURFACE: per-contract realized MFE/MAE
         excursions with NO exit applied (profit potential, exit free). Uses
-        scan_date OR a `days` lookback, `ticker`, `include_open`.
+        scan_date OR a `days` lookback, `ticker`, `delta_min/max`,
+        `include_open`. `aggregate_only=True` returns MFE/MAE quantiles over
+        the FULL filtered set — use it for exit design. The row mode is capped
+        at 200 and truncates oldest-first WITHIN a scan_date, so its oldest
+        date is a highest-MFE-only slice; it reports `truncated`,
+        `matched_rows`, and `partial_scan_date` so you can see that happen.
       * view="harvest" — the touch-probability curve: P(premium touched +X%)
         with CIs, day-of-peak buckets, stop-touch rates. `targets`, `stops`,
         date range, delta band.
@@ -326,7 +331,8 @@ def query_outcomes(
             exit_reason / outcome: row/aggregate filters (per view).
         days: lookback window (surface/win_rate/positions/performance).
         limit: max rows (labels 1-200, signal_performance 1-50, positions 1-200).
-        aggregate_only: labels view — summary stats instead of rows.
+        aggregate_only: labels/surface views — summary stats instead of rows.
+            On `surface` this is also the only mode immune to the 200-row cap.
         include_open: surface view — include not-yet-closed windows.
         targets / stops: harvest view — PERCENT grids.
         target_pct / stop_pct / rule / trail_pct / activation_pct: exit_rule view.
@@ -369,7 +375,13 @@ def query_outcomes(
         )
     if v == "surface":
         return _get_opportunity_surface_impl(
-            scan_date=scan_date, ticker=ticker, days=days, include_open=include_open
+            scan_date=scan_date,
+            ticker=ticker,
+            days=days,
+            include_open=include_open,
+            aggregate_only=aggregate_only,
+            delta_min=delta_min,
+            delta_max=delta_max,
         )
     if v == "harvest":
         return _get_harvest_curve_impl(

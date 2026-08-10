@@ -41,7 +41,10 @@ live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
   `contracts` shortlist in one call. No quote fields on this data plan.
 - `query_outcomes` **(pro)** — the outcomes + receipts substrate, via `view=`:
   `labels` (row-level bracket labels + features; default), `summary` (grouped
-  aggregates), `surface` (per-contract MFE/MAE excursions, exit-free),
+  aggregates), `surface` (per-contract MFE/MAE excursions, exit-free —
+  `aggregate_only=True` gives MFE/MAE quantiles over the WHOLE window and is the
+  mode to use for exit design, since row mode is capped at 200 rows and declares
+  it via `truncated` / `matched_rows` / `partial_scan_date`),
   `harvest` (touch-probability curve), `exit_rule` (score YOUR bracket/trailing
   rule), `signal_performance` / `win_rate` (UNDERLYING-direction, **not** option
   PnL), `positions` / `performance` (the engine's realized paper-trade receipts,
