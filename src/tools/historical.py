@@ -48,8 +48,8 @@ def get_historical_performance(
     a lookback window — one tournament pick per day, real-fill simulation.
 
     Defaults to the LIVE cohort (`V7_1_TILTED_GIGO` AND entry on/after
-    2026-08-10: enter 10:00 ET day after scan, +40% target / -30% stop, flat
-    15:45 ET same day). The cohort restarted 2026-08-10, so expect very small
+    2026-08-13: enter 10:00 ET day after scan, +40% target / -30% stop, flat
+    15:45 ET same day). The cohort restarted 2026-08-13, so expect very small
     N — possibly zero; small-N aggregates are noise-heavy and must be quoted
     with their N. A zero here means "the cohort has not accrued closed trades
     yet", NOT "no track record", and the aggregates come back None rather than

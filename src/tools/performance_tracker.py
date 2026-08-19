@@ -280,7 +280,7 @@ def get_position_history(
     selection. No-trade days are reported separately in `skip_days` (they are
     part of the honest track record); invalid-liquidity rows are excluded.
 
-    Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-08-10): enter 10:00 ET
+    Live policy (`V7_1_TILTED_GIGO`, cohort since 2026-08-13): enter 10:00 ET
     the day after scan, +40% target / -30% stop, flat 15:45 ET same day.
     Earlier policy_version cohorts used different exits AND include cohorts the
     engine has since repudiated — do not mix cohorts

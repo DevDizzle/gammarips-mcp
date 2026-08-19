@@ -65,8 +65,11 @@ SIGNAL_PERFORMANCE_TABLE = _t("signal_performance")
 #
 # Cohort history: 2026-06-26 (live-OI floor) -> 2026-07-29 (tournament
 # liquidity upgrade) -> 2026-08-10 (stale-day-bar fix; the 07-29 cohort's
-# primary print floor never actually fired). See the engine's
-# docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md.
+# primary print floor never actually fired) -> 2026-08-13 (fail-soft restore
+# can never become the pick; 2 of the 08-10 cohort's 3 entries were restores
+# the new code cannot select). See the engine's
+# docs/DECISIONS/2026-08-07-stale-day-bar-early-volume.md and
+# docs/DECISIONS/2026-08-12-failsoft-restore-never-picks.md.
 # NOTE on the predicate, not just the constant: the engine's own cohort_stats
 # query (`signal-notifier/main.py`) writes `DATE(entry_timestamp) >= ...` with
 # NO timezone argument, i.e. UTC-dated; this repo dates in ET. The two agree in
@@ -75,7 +78,7 @@ SIGNAL_PERFORMANCE_TABLE = _t("signal_performance")
 # would break that equivalence. ET is the more correct of the two — do not
 # "fix" it toward the engine's UTC form.
 LIVE_POLICY_VERSION = "V7_1_TILTED_GIGO"
-LIVE_COHORT_START_DATE = "2026-08-10"
+LIVE_COHORT_START_DATE = "2026-08-13"
 
 # Compliance tail. MUST ride every response that carries performance numbers,
 # including the EMPTY ones — an empty cohort response is still a performance
@@ -84,7 +87,7 @@ _PAPER_DISCLAIMER = "Paper-traded. Not investment advice."
 
 LIVE_COHORT_NOTE = (
     "Live cohort = policy_version='V7_1_TILTED_GIGO' AND entry on/after "
-    "2026-08-10. The ledger retains earlier cohorts under the SAME policy "
+    "2026-08-13. The ledger retains earlier cohorts under the SAME policy "
     "label (resets are date-filter only, not truncations), so the label alone "
     "does not define the cohort. Realized-only: a trade appears the day AFTER "
     "it exits, so the live cohort reads one session behind the engine's own "
@@ -102,9 +105,11 @@ DISOWNED_COHORT_NOTE = (
     "older exit mechanics. Resets: 2026-06-26 (live-OI floor), 2026-07-29 "
     "(tournament liquidity upgrade), 2026-08-10 (stale-day-bar fix — the "
     "2026-07-29 cohort's primary print floor never actually fired, and two of "
-    "its picks were selected on a phantom liquidity count). Rows before "
-    "2026-08-10 are NOT the live track record and must not be aggregated into "
-    "one. " + _PAPER_DISCLAIMER
+    "its picks were selected on a phantom liquidity count), 2026-08-13 "
+    "(fail-soft restore can never become the pick — two of the 2026-08-10 "
+    "cohort's three entries were restores the new selection cannot make). "
+    "Rows before 2026-08-13 are NOT the live track record and must not be "
+    "aggregated into one. " + _PAPER_DISCLAIMER
 )
 
 # --- Firestore collections --------------------------------------------------
