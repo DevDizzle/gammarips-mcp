@@ -89,3 +89,29 @@ is `gammarips-engine/docs/GTM-ORGANIC-GROWTH-PLAN.md` item D4.
   the selling.
 - The AS metadata mirror on the MCP host is a convenience for old clients
   and is never edited by hand.
+
+## Known residual (found 2026-08-19 during the prod e2e): 127.0.0.1 loopback redirects
+
+The App Hosting edge (Google Front End) rewrites the literal token `127.0.0.1`
+inside a query parameter before the request reaches the Next.js route, an
+SSRF-style normalization. Effect on the authorization server:
+
+- A `redirect_uri` whose host is the literal `127.0.0.1` fails the redirect
+  match on **production** (400 "Invalid redirect_uri"), even when it exactly
+  equals the registered value.
+- The SAME request passes on local dev (identical code + prod Firestore), and
+  passes on prod when the `redirect_uri` is omitted (the route uses the stored
+  value) or when the host dots are percent-encoded (`127%2E0%2E0%2E1`). So the
+  webapp code is correct; the platform mangles the incoming query token.
+- `localhost`, `https`, and private-use scheme redirects are unaffected (all
+  302). The prod e2e is green end to end using `localhost`.
+
+Impact: low. Chat clients use `https` (ChatGPT, claude.ai, Cursor) or bind
+`localhost` (Claude Code, whose CIMD document registers both `localhost` and
+`127.0.0.1`). A native client that uses ONLY a `127.0.0.1` loopback would 400.
+
+Guidance: developer copy should tell native clients to use `localhost` as the
+loopback host, not `127.0.0.1`. A code-side mitigation is not reliable (the
+value is already altered before the route runs); the real fix, if a client
+ever needs it, is an App Hosting / Cloud Armor rule exception, which is an
+owner + infra change. Not a launch blocker.
