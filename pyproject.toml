@@ -1,6 +1,6 @@
 [project]
 name = "gammarips-mcp"
-version = "4.0.0"
+version = "4.2.0"
 description = "GammaRips MCP Server - Agent-first options trading intelligence"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,6 +12,9 @@ dependencies = [
     "httpx>=0.24.0",
     "pandas-market-calendars>=4.4.0",
     "pydantic>=2.0.0",
+    # OAuth 2.1 resource server (utils/oauth.py): RS256 access-token verification.
+    # Already pulled in by `mcp`, pinned here so the dependency is explicit.
+    "PyJWT[crypto]>=2.10.0",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
 ]

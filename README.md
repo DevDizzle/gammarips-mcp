@@ -14,11 +14,19 @@ Every trading morning GammaRips scans the US options market for unusual institut
 - **SSE (legacy, deprecation window):** `https://mcp.gammarips.com/sse`
 - **Stateless JSON-RPC:** `https://mcp.gammarips.com/jsonrpc`
 - **Server card:** `https://mcp.gammarips.com/.well-known/mcp/server-card.json`
-- **Auth:** bearer-token tiering (Phase 2). Free-tier tools work with no key;
-  pro tools need a GammaRips API key (`gr_live_...`) sent as
-  `Authorization: Bearer <key>`. Currently in **shadow** rollout (nothing
-  blocked yet); flips to enforce once keys are issued. Get one at
-  [gammarips.com/pricing](https://gammarips.com/pricing).
+- **OAuth endpoint (chat clients):** `https://mcp.gammarips.com/pro`. Same
+  server, same 9 tools, but it requires a credential, so ChatGPT, Claude
+  (claude.ai / Desktop), Cursor, and any MCP client that speaks OAuth 2.1
+  offers a GammaRips sign-in when you add it. Your subscription tier rides in
+  the token. Discovery: `/.well-known/oauth-protected-resource/pro`;
+  authorization server: `https://gammarips.com`.
+- **Auth:** two credentials, one tiering. (1) API key: `gr_live_...` as
+  `Authorization: Bearer <key>` (or `X-API-Key`), for clients that can send a
+  header. (2) OAuth 2.1 access token, minted by gammarips.com after you sign in
+  (chat clients) or by a machine client with `client_credentials` (headless
+  agents, see below). Free-tier tools work on `/mcp` with no credential at all;
+  the 4 pro tools need an active subscription on either credential. **Enforce**
+  is live. Get access at [gammarips.com/pricing](https://gammarips.com/pricing).
 
 ## Available tools (9)
 
@@ -91,7 +99,45 @@ claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp
 # Pro (with your key):
 claude mcp add --transport http gammarips https://mcp.gammarips.com/mcp \
   --header "Authorization: Bearer gr_live_your_key"
+
+# Pro with OAuth instead of a key (sign in once in the browser, tokens refresh):
+claude mcp add --transport http gammarips https://mcp.gammarips.com/pro
+# then run /mcp inside Claude Code and choose "Authenticate"
 ```
+
+### ChatGPT, Claude (claude.ai / Desktop), and other OAuth chat clients
+
+Add a custom connector / remote MCP server with the URL
+`https://mcp.gammarips.com/pro`. The client discovers the authorization server
+(gammarips.com), registers itself (Client ID Metadata Document or dynamic
+registration), and opens the GammaRips sign-in + consent page. No key to paste.
+Not subscribed yet? The connection still works on the free tools and the pro
+tools answer with the subscribe steps; pro access applies on the next token
+refresh (within an hour) after you subscribe, or when you reconnect.
+
+### Headless agents (a VM, a cron, a server): machine clients
+
+For an agent with no browser and no human, create a **machine client** on
+[gammarips.com/account](https://gammarips.com/account) (Agent Access required).
+You get a `client_id` + `client_secret` (shown once). Mint a one-hour access
+token with the `client_credentials` grant and send it as a bearer:
+
+```bash
+TOKEN=$(curl -s -u "$GR_CLIENT_ID:$GR_CLIENT_SECRET" \
+  -d grant_type=client_credentials \
+  -d resource=https://mcp.gammarips.com/pro \
+  https://gammarips.com/oauth/token | jq -r .access_token)
+
+# Claude Code headless (claude -p), with the token in .mcp.json:
+#   { "mcpServers": { "gammarips": { "type": "http",
+#       "url": "https://mcp.gammarips.com/pro",
+#       "headers": { "Authorization": "Bearer ${GAMMARIPS_MCP_TOKEN}" } } } }
+GAMMARIPS_MCP_TOKEN="$TOKEN" claude -p "..." 
+```
+
+Mint before each run: there is no refresh token for machine clients, and the
+tier is re-read from your subscription on every mint. An API key still works
+for the same purpose; the machine client is the short-lived-credential option.
 
 ### Cursor
 
@@ -144,7 +190,7 @@ Omit `headers` for the free tier (5 anon tools).
 
 Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
 
-Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing).
+Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing), or connect through `/pro` and sign in.
 
 ## Local development
 
@@ -188,6 +234,9 @@ See `.env.example` for the current environment variables. Typical values include
 - `GCS_BUCKET_NAME`
 - `LOG_LEVEL`
 - `PORT`
+- `REQUIRE_API_KEY` / `AUTH_SHADOW` (API-key gate mode)
+- `OAUTH_ENABLED` / `OAUTH_ISSUER` / `OAUTH_JWKS_URL` / `OAUTH_MCP_RESOURCE_ORIGINS`
+  (OAuth 2.1 resource server; defaults are production, see `src/utils/oauth.py`)
 
 ## Validation
 
@@ -234,8 +283,9 @@ gcloud run deploy gammarips-mcp --source=. \
 
 See [`SECURITY.md`](./SECURITY.md) for the trust model — read-only guarantee,
 parameterized-query SQL-injection defense, response-size bounds, per-IP rate
-limits, sanitized errors, leakage-safe views, and the column-classification
-data contract.
+limits, sanitized errors, leakage-safe views, the column-classification
+data contract, and the OAuth 2.1 resource-server model (this service only
+verifies tokens; gammarips.com is the authorization server).
 
 ## License
 

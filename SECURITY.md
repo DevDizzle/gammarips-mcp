@@ -1,8 +1,8 @@
 # Security & Trust Model — gammarips-mcp
 
-> **Last reviewed:** 2026-08-07 (V4 surface — 9 tools; live-cohort definition corrected)
+> **Last reviewed:** 2026-08-19 (V4 surface — 9 tools; OAuth 2.1 resource server added, `/pro` endpoint)
 > **Service URL:** `https://mcp.gammarips.com`
-> **Distribution:** public, unauthenticated (bearer-token tiers are Phase 2 of `docs/MCP-V3-SPEC.md`), listed on Smithery
+> **Distribution:** public; `/mcp` is anonymous for the free tier, pro tools need a credential (API key or OAuth access token); `/pro` requires a credential; listed on Smithery
 
 This document is the trust model for the GammaRips MCP server. It describes
 what guarantees the server makes to its consumers (chat agents, paying-customer
@@ -227,6 +227,51 @@ the batch is denied if any element is disallowed). The `/rpc` handler also
 re-checks tier against the middleware-resolved identity (defense-in-depth
 against a body-sniff/handler parser divergence).
 
+### OAuth 2.1 resource server (2026-08-19, `src/utils/oauth.py`)
+
+This service is an **OAuth 2.1 resource server only** (MCP authorization spec
+2026-07-28). It mints nothing, stores nothing, and writes nothing; the
+read-only trust model is unchanged. The **authorization server is
+gammarips.com** (Firebase sign-in + consent, RFC 7591 dynamic registration,
+Client ID Metadata Documents, PKCE S256, RS256 access tokens, rotating
+refresh tokens, `client_credentials` for machine clients). Decision:
+`docs/DECISIONS/2026-08-15-oauth-pro-endpoint.md`.
+
+- **Verification:** a bearer that is a JWT is verified locally against the
+  issuer's JWKS (`https://gammarips.com/oauth/jwks`, cached 1h, refetch on an
+  unknown `kid` at most once per minute so bogus kids cannot amplify
+  requests against the issuer). Checks: `alg=RS256` only (no HS256 confusion),
+  signature, `exp`/`nbf`/`iat` (60s leeway), `iss` = the issuer, `aud` ∈ the
+  set of OUR resource URIs (RFC 8707: `https://mcp.gammarips.com{,/pro,/mcp}`
+  and the run.app hosts), `sub` present. Anything else is anon. Tokens for
+  other resources are rejected; no token is ever passed upstream.
+- **Tier:** the token's `tier` claim, stamped by the authorization server from
+  the live subscription and re-read on every refresh (≤1h) and every machine
+  mint. Only exactly `pro` is privileged — fail-closed on privilege, same rule
+  as keys. A valid token with `tier=free` is a real credential (it is admitted
+  to `/pro`) whose pro tool calls get the `subscription_required` envelope.
+- **`/pro`:** the same Streamable HTTP transport as `/mcp` (path rewritten
+  in-process after the gate) but a request without a VALID credential gets
+  `401` + `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource/pro", scope="mcp:read"`
+  (plus `error="invalid_token"` when a credential was presented and rejected),
+  which is what makes a chat client start the OAuth flow. API keys work on
+  `/pro`; JWTs work on `/mcp`. `/mcp` stays anonymous so the free funnel never
+  regresses. Master switch `OAUTH_ENABLED` (default true; false = JWTs rejected
+  as bad-format, `/pro` and the discovery routes 404).
+- **Discovery:** RFC 9728 protected-resource metadata at
+  `/.well-known/oauth-protected-resource` (root) and `/…/pro`, `/…/mcp`
+  (path forms); RFC 8414 authorization-server metadata is **mirrored** from
+  the issuer at `/.well-known/oauth-authorization-server` for clients that
+  only probe the MCP host (cached 10 min, issuer-checked, never a second
+  source of truth).
+- **Metering:** `MCP_TOOL_CALL` now carries `client_class`
+  (`none | api_key | oauth_user | oauth_machine`), `client_id` (the OAuth
+  client, e.g. `https://claude.ai/oauth/claude-code-client-metadata`) and
+  `endpoint` (`mcp | pro`), so denial-by-client is one query.
+- **Not defended here:** the authorization server's own surface (consent
+  phishing, redirect validation, code/refresh storage) is the webapp's
+  trust model; see that repo.
+
 ---
 
 ## Reporting a vulnerability
@@ -247,6 +292,7 @@ We will reply within 48h on weekdays.
 
 | Date | Change |
 |---|---|
+| 2026-08-19 | **OAuth 2.1 resource server + `/pro` endpoint.** New `src/utils/oauth.py`: RS256 access tokens from the gammarips.com authorization server are verified locally (JWKS, `iss`, `aud` ∈ our resource URIs, 60s leeway, RS256 only) and map to the SAME `Identity` as API keys; `tier` claim → pro only when exactly `pro`. `/pro` requires a valid credential (401 + RFC 9728 `WWW-Authenticate` discovery otherwise) and is path-rewritten to the `/mcp` transport; `/mcp` unchanged (anonymous free tier, JWTs honored like keys). Discovery routes: `/.well-known/oauth-protected-resource{,/pro,/mcp}`, `/.well-known/oauth-authorization-server` (issuer mirror). Meter gains `client_class` / `client_id` / `endpoint`. Denial envelope now tells OAuth clients pro applies on the next refresh. `SERVER_VERSION` 4.2.0. No tool, data, clamp, or leakage-view change; the service still writes nothing. |
 | 2026-08-07 | **Live-cohort definition corrected (data-integrity fix on the paid surface).** The receipts views (`positions`, `performance`) filtered the live cohort by `policy_version` ALONE. Since 2026-07-28 the engine's cohort resets are DATE-FILTER resets rather than ledger truncations, so disowned cohorts remain in `forward_paper_ledger` under the same label — this server served the disowned 2026-07-29 cohort as live receipts for ~10 days, including two picks the engine established were selected on a phantom liquidity count. The live cohort is now the **pair** (`LIVE_POLICY_VERSION`, `LIVE_COHORT_START_DATE`), both from `src/utils/data.py`. The 2026-07-02 V3 spec had always specified a date floor; the code never applied it. **Response shape (additive):** `positions` and `performance` now carry `cohort_start`. **Semantics:** the live cohort can legitimately be EMPTY after a reset, and at N=0 the aggregate stats (`win_rate`, `avg_return`, `median_return`, `best`, `worst`) are `null`, NOT `0.0` — a fabricated zero on a paid performance surface is worse than an absent number. `policy_version="all"` still reaches every era but now carries an explicit disowned-cohort warning. `SERVER_VERSION` 4.1.0. No change to read-only status, parameterization, tiering, clamps, or the no-same-day-pick guarantee. |
 | 2026-07-17 | **V4 consolidation (29 → 9 tools).** Merged the surface into 9 arg-driven tools (absorbed tools become `view=`/`granularity=` modes); reused the V3 query logic verbatim, so all leakage-safe views, pick-flag guards, cohort discipline, redaction, clamps, and rate buckets are unchanged. **Removed `web_search`** (its per-IP + global buckets are now dormant, plumbing retained). Free tier is now 5 tools (get_pool, get_regime_context, get_market_calendar_status, get_playbook, get_daily_report); the 4 pro tools require a key. `SERVER_VERSION` 4.0.0. |
 | 2026-07-06 | **Eval wave 1+2.** TF-01/03 (bare `win_rate` keys deleted; universe in field names), TF-02 (`get_enriched_signals` summary default + strict `fields` projection + offset paging), TF-15 (`is_tradeable` dropped), TF-04/06/07/09/10/11/12/13/16 polish. **`get_contract_snapshot` added (RM-001a)** — reintroduces a single scoped Polygon snapshot call: bearer-header key, anchored OCC-regex input, 10s timeout, 30/min global bucket, no quote fields (RM-001b blocked on data plan). **`get_harvest_curve` added (RM-005)** — aggregate-only touch-probability curve from the closed-window opportunity surface; playbooks/explainer updated with the 2026-07-06 pre-registered study results (TF-17). |

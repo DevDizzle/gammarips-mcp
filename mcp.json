@@ -2,12 +2,23 @@
   "name": "GammaRips",
   "description": "Options-flow intelligence primitives for AI agents: a hard-curated overnight candidate pool, point-in-time features, realized opportunity surfaces (MFE/MAE excursions), bracket outcome labels, and methodology playbooks. Your agent reasons to its own contract and exit — no pick endpoint. Paper-traded research data; educational only; not investment advice.",
   "url": "https://mcp.gammarips.com/mcp",
+  "oauth_url": "https://mcp.gammarips.com/pro",
   "legacy_sse_url": "https://mcp.gammarips.com/sse",
   "auth": {
     "type": "bearer",
     "header": "Authorization",
     "scheme": "Bearer",
-    "note": "5 free-tier tools work without a key (get_pool preview view, get_regime_context, get_market_calendar_status, get_playbook, get_daily_report). The 4 pro tools plus the full pool (get_pool enriched/raw/features, get_signal, get_liquidity, query_outcomes, replay_contract) require a GammaRips API key (gr_live_...) sent as 'Authorization: Bearer <key>'. Get a key at https://gammarips.com/pricing.",
+    "note": "Two ways in. API key: 5 free-tier tools work without a key (get_pool preview view, get_regime_context, get_market_calendar_status, get_playbook, get_daily_report); the 4 pro tools plus the full pool (get_pool enriched/raw/features, get_signal, get_liquidity, query_outcomes, replay_contract) require a GammaRips API key (gr_live_...) sent as 'Authorization: Bearer <key>'. OAuth 2.1: connect to https://mcp.gammarips.com/pro and sign in with your GammaRips account when the client asks; the access token carries your subscription tier (ChatGPT, Claude, Cursor, and any OAuth-capable MCP client). Headless agents can mint client_credentials tokens from a machine client created on https://gammarips.com/account. Get access at https://gammarips.com/pricing.",
+    "oauth": {
+      "endpoint": "https://mcp.gammarips.com/pro",
+      "authorization_server": "https://gammarips.com",
+      "resource_metadata": "https://mcp.gammarips.com/.well-known/oauth-protected-resource/pro",
+      "grants": [
+        "authorization_code+pkce",
+        "refresh_token",
+        "client_credentials"
+      ]
+    },
     "pricing_url": "https://gammarips.com/pricing"
   },
   "tools": [
@@ -22,14 +33,26 @@
     "get_daily_report"
   ],
   "publication_time": "pool ~05:30 ET weekdays; labels/surfaces T+1 after window close",
-  "universe": "5,230 US equities scanned; ~50-name curated BULLISH pool daily",
-  "tags": ["options", "institutional-flow", "overnight", "opportunity-surface", "paper-trading", "research-data", "mcp", "agents"],
+  "universe": "about 3,500 optionable US stocks scanned nightly; ~50-name curated BULLISH pool daily",
+  "tags": [
+    "options",
+    "institutional-flow",
+    "overnight",
+    "opportunity-surface",
+    "paper-trading",
+    "research-data",
+    "mcp",
+    "agents"
+  ],
   "links": {
     "home": "https://gammarips.com",
     "pricing": "https://gammarips.com/pricing",
     "developers": "https://gammarips.com/developers",
     "llms_txt": "https://gammarips.com/llms.txt"
   },
-  "creator": { "name": "GammaRips", "url": "https://gammarips.com" },
+  "creator": {
+    "name": "GammaRips",
+    "url": "https://gammarips.com"
+  },
   "license": "https://gammarips.com/terms"
 }

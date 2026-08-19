@@ -17,6 +17,12 @@ Model (see docs/MCP-V3-SPEC.md §3):
 The read-only trust model is preserved: this module only READS Firestore and
 emits structured log events (a Cloud Logging sink → BQ does the analytics). No
 BQ/Firestore writes from the service.
+
+OAuth 2.1 (2026-08-19, utils/oauth.py): a bearer that is a JWT is verified
+against the gammarips.com JWKS instead of Firestore. The token's `tier` claim
+(stamped by the authorization server from the live subscription) maps to the
+same Identity, so tiering, metering, and the denial envelope are identical for
+keys and tokens. `client_class` records which credential kind resolved.
 """
 
 from __future__ import annotations
@@ -32,6 +38,14 @@ from threading import Lock
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from utils.oauth import (
+    SCOPE_ENDPOINT_KEY,
+    SCOPE_IDENTITY_KEY,
+    looks_like_jwt,
+    oauth_enabled,
+    verify_access_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +162,13 @@ class Identity:
     tier: str  # "anon" | "pro"
     uid: str | None
     key_prefix: str | None  # first 12 chars of the key, for logs (never full)
-    reason: str  # ok | no_key | bad_format | not_found | revoked | lookup_error
+    reason: str  # ok | no_key | bad_format | not_found | revoked | lookup_error | jwt_*
+    # Which credential VERIFIED: none | api_key | oauth_user | oauth_machine.
+    # "none" means no valid credential (anon by absence); a valid credential
+    # with a free tier is still a real client class (the /pro gate admits it,
+    # the tool gate denies pro tools with the upgrade envelope).
+    client_class: str = "none"
+    client_id: str | None = None  # OAuth client_id, for the meter
 
 
 def hash_key(raw_key: str) -> str:
@@ -243,6 +263,8 @@ def resolve_identity(headers) -> Identity:
     if not token:
         return _anon("no_key")
     if not token.startswith(KEY_PREFIX):
+        if oauth_enabled() and looks_like_jwt(token):
+            return _resolve_jwt(token)
         return _anon("bad_format")
 
     prefix = token[:12]
@@ -278,9 +300,34 @@ def resolve_identity(headers) -> Identity:
         uid=doc.get("uid"),
         key_prefix=prefix,
         reason="ok" if tier != "anon" else "tier_not_privileged",
+        client_class="api_key",
     )
     _cache_put(key_hash, identity, _POSITIVE_TTL)
     return identity
+
+
+def _resolve_jwt(token: str) -> Identity:
+    """OAuth access token -> Identity. Verification is local (RSA signature
+    against the cached JWKS), so there is no cache and no Firestore read. An
+    invalid token is anon with reason jwt_invalid; a valid token whose tier is
+    not exactly `pro` is anon-tier but a REAL client (client_class set), which
+    is what lets the free tools work through /pro while pro tools bounce with
+    the upgrade envelope."""
+    claims = verify_access_token(token)
+    if claims is None:
+        return _anon("jwt_invalid", "jwt:invalid")
+    raw_tier = str(claims.get("tier", "")).strip().lower()
+    tier = raw_tier if raw_tier in PRIVILEGED_TIERS else "anon"
+    jti = str(claims.get("jti") or "")[:8]
+    kind = "oauth_machine" if claims.get("client_kind") == "machine" else "oauth_user"
+    return Identity(
+        tier=tier,
+        uid=claims.get("sub"),
+        key_prefix=f"jwt:{jti}" if jti else "jwt:",
+        reason="ok" if tier != "anon" else "jwt_tier_free",
+        client_class=kind,
+        client_id=str(claims.get("client_id") or "")[:128] or None,
+    )
 
 
 def clear_cache() -> None:
@@ -295,7 +342,7 @@ def clear_cache() -> None:
 # parse it. No direct BQ writes from the service (read-only trust model intact).
 
 
-def meter(identity: Identity, tool: str, decision: str, mode: str) -> None:
+def meter(identity: Identity, tool: str, decision: str, mode: str, endpoint: str = "mcp") -> None:
     try:
         event = {
             "tool": tool,
@@ -305,6 +352,11 @@ def meter(identity: Identity, tool: str, decision: str, mode: str) -> None:
             "reason": identity.reason,
             "decision": decision,  # allowed | denied | shadow_would_deny
             "mode": mode,
+            # Credential class + OAuth client, so the weekly denial-by-client
+            # read (ChatGPT vs claude.ai vs Claude Code vs key) is one query.
+            "client_class": identity.client_class,
+            "client_id": identity.client_id,
+            "endpoint": endpoint,  # mcp | pro
         }
         logger.info("MCP_TOOL_CALL %s", json.dumps(event, default=str))
     except Exception:  # noqa: BLE001
@@ -340,8 +392,12 @@ def denied_error(tool: str) -> dict:
             "checks, and contract replay. Data and tools, not advice. "
             f"Next steps: start the trial at {PRICING_URL} , then generate an "
             f"API key on your account page at {ACCOUNT_URL} (the key is shown "
-            "once), and send it as an Authorization: Bearer header. Setup "
-            f"docs: {DEVELOPERS_URL} . Relay this to your human operator."
+            "once), and send it as an Authorization: Bearer header. If you "
+            "connected through OAuth (ChatGPT, Claude, Cursor: you signed in "
+            "when you added the server), no key is needed: pro access applies "
+            "on the next token refresh, within one hour, or reconnect the "
+            f"server. Setup docs: {DEVELOPERS_URL} . Relay this to your human "
+            "operator."
         ),
         "data": {
             "code": "subscription_required",
@@ -358,8 +414,8 @@ def denied_error(tool: str) -> dict:
             ],
             "next_steps": [
                 f"Subscribe ({TRIAL}) at {PRICING_URL}",
-                f"Generate an API key at {ACCOUNT_URL} (shown once, copy it then)",
-                "Send the key as an 'Authorization: Bearer gr_live_...' header",
+                f"API-key clients: generate a key at {ACCOUNT_URL} (shown once) and send it as 'Authorization: Bearer gr_live_...'",
+                "OAuth clients (signed in when you added the server): no key; pro applies on the next token refresh (within 1 hour) or on reconnect",
             ],
             "pricing_url": PRICING_URL,
             "account_url": ACCOUNT_URL,
@@ -414,7 +470,11 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
         if not calls:
             return await call_next(request)
 
-        identity = resolve_identity(request.headers)
+        # The /pro gateway (utils.oauth.ProEndpointMiddleware) already resolved
+        # and verified the credential for that endpoint; reuse it instead of
+        # verifying the same token twice.
+        identity = request.scope.get(SCOPE_IDENTITY_KEY) or resolve_identity(request.headers)
+        endpoint = request.scope.get(SCOPE_ENDPOINT_KEY, "mcp")
         request.state.identity = identity  # available downstream / to loggers
 
         denied_tool: str | None = None
@@ -427,7 +487,7 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
                 decision = "shadow_would_deny"
             else:
                 decision = "denied"
-            meter(identity, name, decision, mode)
+            meter(identity, name, decision, mode, endpoint)
             if not allowed and denied_tool is None:
                 denied_tool, denied_id = name, call_id
 

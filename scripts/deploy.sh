@@ -17,6 +17,14 @@
 #     deliberately, set REQUIRE_API_KEY=false.
 #   * BIGQUERY_DATASET / GCS_BUCKET_NAME / *_TABLE values are CODE DEFAULTS, not
 #     env vars on the live service — intentionally not set here.
+#   * OAUTH_ENABLED=true (2026-08-19): OAuth 2.1 resource server + /pro endpoint
+#     (src/utils/oauth.py). The issuer/JWKS/audience defaults in code are the
+#     production values (https://gammarips.com, mcp.gammarips.com + run.app
+#     hosts). Set OAUTH_ENABLED=false to dark-ship: JWTs become bad-format
+#     bearers, /pro and the discovery routes 404, /mcp + API keys unchanged.
+#     Flip without a redeploy:
+#       gcloud run services update gammarips-mcp --region=us-central1 \
+#         --project=profitscout-fida8 --update-env-vars OAUTH_ENABLED=true
 
 set -e  # Exit on error
 
@@ -49,7 +57,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --concurrency=80 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="REQUIRE_API_KEY=true,AUTH_SHADOW=true" \
+    --set-env-vars="REQUIRE_API_KEY=true,AUTH_SHADOW=true,OAUTH_ENABLED=true" \
     --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_CSE_ID=GOOGLE_CSE_ID:latest,FMP_API_KEY=FMP_API_KEY:latest"
 
 echo ""

@@ -26,6 +26,16 @@ from utils.auth import (
     resolve_identity,
     tool_allowed,
 )
+from utils.oauth import (
+    PRO_PATH,
+    ProEndpointMiddleware,
+    authorization_server_metadata,
+    oauth_enabled,
+    protected_resource_metadata,
+)
+from utils.oauth import (
+    issuer as oauth_issuer,
+)
 from utils.safety import RateLimitMiddleware, redact
 
 # Load environment variables
@@ -41,7 +51,10 @@ logger = logging.getLogger(__name__)
 # 4.1.0 (2026-08-07): the live cohort is now the PAIR (policy label, start date);
 # `cohort_start` added to the positions/performance responses; aggregate stats are
 # null (never 0.0) at N=0. Minor-bumped so consumers can detect the semantics change.
-SERVER_VERSION = "4.1.0"
+# 4.2.0 (2026-08-19): OAuth 2.1 resource server. `/pro` = auth-required MCP endpoint
+# (401 + RFC 9728 discovery for chat clients), `/mcp` unchanged (anonymous), JWT
+# bearers honored everywhere API keys are. No tool or data change.
+SERVER_VERSION = "4.2.0"
 
 # Initialize FastMCP server
 mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
@@ -235,12 +248,29 @@ async def server_card(request: Request):
                 "type": "bearer",
                 "scheme": "Bearer",
                 "description": (
-                    "Send a GammaRips API key (gr_live_...) as "
-                    "'Authorization: Bearer <key>' (or X-API-Key). Free tier "
-                    "tools are usable without a key; pro tools require an active "
-                    "subscription. Get a key at https://gammarips.com/pricing."
+                    "Two ways in. (1) API key: send a GammaRips key (gr_live_...) "
+                    "as 'Authorization: Bearer <key>' (or X-API-Key) to /mcp. "
+                    "(2) OAuth 2.1: connect a chat client (ChatGPT, Claude, "
+                    "Cursor) to /pro and complete the sign-in it offers; the "
+                    "access token carries your subscription tier. Free tier tools "
+                    "are usable without any credential on /mcp; pro tools require "
+                    "an active subscription. https://gammarips.com/pricing"
                 ),
                 "pricing_url": "https://gammarips.com/pricing",
+                "oauth": (
+                    {
+                        "endpoint": "/pro",
+                        "authorization_server": oauth_issuer(),
+                        "resource_metadata": "/.well-known/oauth-protected-resource/pro",
+                        "grants": [
+                            "authorization_code+pkce",
+                            "refresh_token",
+                            "client_credentials",
+                        ],
+                    }
+                    if oauth_enabled()
+                    else None
+                ),
             },
             "tools": get_tools_list(),
             "resources": [
@@ -382,11 +412,14 @@ class RequestLogger(BaseHTTPMiddleware):
         response = await call_next(request)
         duration = time.time() - start
 
-        # Log every request with useful metadata
+        # Log every request with useful metadata. `endpoint` is "pro" when the
+        # /pro gateway rewrote the path to /mcp, so the two surfaces stay
+        # distinguishable in the request log.
         logger.info(
             "MCP_REQUEST",
             extra={
                 "path": request.url.path,
+                "endpoint": request.scope.get("gammarips_endpoint", "mcp"),
                 "method": request.method,
                 "user_agent": request.headers.get("user-agent", "unknown"),
                 "origin": request.headers.get("origin", "unknown"),
@@ -435,6 +468,12 @@ try:
     # REQUIRE_API_KEY / AUTH_SHADOW so rollout + rollback are a flag flip.
     app.add_middleware(AccessGateMiddleware)
 
+    # OAuth 2.1 resource server: the /pro gateway. Sits OUTSIDE the access gate
+    # (it resolves the credential once and hands it down) and INSIDE the rate
+    # limiter (a token flood is 429'd before any signature check). Path-rewrites
+    # /pro -> /mcp on success, 401 + RFC 9728 discovery header otherwise.
+    app.add_middleware(ProEndpointMiddleware)
+
     # Per-IP token-bucket rate limiter — defends the paid Google CSE tool
     # and BQ cost surface against unauthenticated abuse. Limits are
     # generous: 60 req/min default, 10 req/min for web_search.
@@ -477,6 +516,23 @@ try:
     # Add Server Card (Discovery)
     app.add_route("/.well-known/mcp/server-card.json", server_card, methods=["GET"])
     logger.info("Added stateless JSON-RPC endpoints and server card")
+
+    # OAuth discovery (RFC 9728 protected-resource metadata: root + path forms;
+    # RFC 8414 AS metadata mirrored from the issuer for legacy probing).
+    app.add_route(
+        "/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]
+    )
+    app.add_route(
+        "/.well-known/oauth-protected-resource/{suffix:path}",
+        protected_resource_metadata,
+        methods=["GET"],
+    )
+    app.add_route(
+        "/.well-known/oauth-authorization-server", authorization_server_metadata, methods=["GET"]
+    )
+    logger.info(
+        f"OAuth resource server: enabled={oauth_enabled()} issuer={oauth_issuer()} pro={PRO_PATH}"
+    )
 
 except Exception as e:
     logger.error(f"Failed to create ASGI app: {e}", exc_info=True)
