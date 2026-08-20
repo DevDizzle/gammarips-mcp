@@ -188,8 +188,10 @@ def get_enriched_signals(
     news, technicals, catalyst context, a delta-targeted recommended contract,
     and (since 2026-06) the 60-day momentum feature `mom_60`.
 
-    Enrichment gate: `overnight_score >= 4` AND directional UOA > $500K, then
-    edge-ranked to the top ~50 BULLISH names. This is the pool the engine's
+    Enrichment gate: `overnight_score >= 1` AND directional UOA > $500K, then
+    edge-ranked to the top ~50 BULLISH names. The score floor is cosmetic:
+    the UOA bar, the BULLISH gate, and the top-50 cap do the filtering.
+    This is the pool the engine's
     own selection works from; your agent should treat it as the daily
     candidate set and reason to its OWN contract (see
     get_playbook("run-your-own-tournament")).

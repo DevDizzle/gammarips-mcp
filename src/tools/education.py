@@ -38,7 +38,9 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "implied-vol regime."
         ),
         "how_used": (
-            "Enrichment requires score ≥ 4; the engine's own daily selection is "
+            "Enrichment requires score >= 1 plus directional UOA > $500K. The "
+            "score floor is cosmetic: the UOA bar, the BULLISH-only gate, and "
+            "the top-50 cap do the filtering. The engine's own daily selection is "
             "drawn from this pool after the BULLISH-only gate, a delta edge-rank "
             "to the top ~50, two safety rails (no earnings in the exclusion "
             "window; VIX ≤ VIX3M), and a randomized 3-bracket consensus "

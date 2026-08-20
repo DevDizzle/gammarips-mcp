@@ -90,8 +90,10 @@ def get_pool(
 
       * view="enriched" (DEFAULT) — the curated AI-enriched pool: news,
         technicals, catalyst, a delta-targeted recommended contract, and the
-        60-day momentum feature `mom_60`. Enrichment gate: overnight_score>=4
-        AND directional UOA>$500K, edge-ranked to the top ~50 BULLISH names.
+        60-day momentum feature `mom_60`. Enrichment gate: overnight_score>=1
+        AND directional UOA>$500K, edge-ranked to the top ~50 BULLISH names
+        (the score floor is cosmetic; the UOA bar, the BULLISH gate, and
+        the top-50 cap do the filtering).
         This is the daily candidate set your agent reasons over to its OWN
         contract (see get_playbook("run-your-own-tournament")). Served from a
         leakage-safe view (forward-outcome columns physically stripped);

@@ -12,7 +12,7 @@ operating rule we run) - `architecture-fact` (a data-contract / pipeline fact). 
 is **exit-conditional** — read each note's `Exit-context` before citing it.
 
 ## Selection & methodology policy — how the pool is built and why
-- [[enrichment-definition]] — policy-adopted — "enriched" = overnight_score >= 4 (a floor) + directional UOA > $500K
+- [[enrichment-definition]] — policy-adopted — "enriched" = overnight_score >= 1 (a cosmetic floor) + directional UOA > $500K
 - [[bullish-only-hard-gate]] — policy-adopted — the pool is hard-gated BULLISH-only (call-delta levers don't transfer to puts)
 - [[tourney-pool-cap-edge-rank]] — policy-adopted — soft edge-rank (delta / RR / ATR) then cap, before the tournament
 - [[bracket-tournament-selection]] — policy-adopted — one signal/day or none via a 3-bracket randomized tournament (consensus 3/3=high; no memory/rubric; fail-closed)

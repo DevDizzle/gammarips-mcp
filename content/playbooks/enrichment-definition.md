@@ -3,13 +3,16 @@ Type: methodology
 Tag: policy-adopted
 Exit-context: n/a (a pool-admission definition, not a measured edge)
 Source: GammaRips methodology
-Date: 2026-07-17
+Date: 2026-08-20
 
-# "Enriched" = overnight_score >= 4 + directional UOA > $500K
+# "Enriched" = overnight_score >= 1 + directional UOA > $500K
 
 The curated pool has exactly two admission criteria at the scan stage:
-- **`overnight_score >= 4`** — a FLOOR, not a ceiling. EV inverts at `>= 7`, so a higher
-  threshold is worse, not better; the floor holds at 4.
+- **`overnight_score >= 1`** — a cosmetic floor. The UOA bar, the BULLISH-only gate, and
+  the top-50 cap do the real filtering. History: earlier docs claimed a `>= 4` floor, but
+  that floor never ran in production, and the owner accepted the `>= 1` floor on
+  2026-08-20. The old evidence stays valid as history: EV inverts at `>= 7`, so a HIGHER
+  threshold is worse, not better.
 - **directional unusual-options-activity (UOA) > $500K**.
 
 At this cheap scan/UOA stage the pool is **all directions**. The BULLISH-only narrowing
