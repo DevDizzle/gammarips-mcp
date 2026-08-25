@@ -5,12 +5,19 @@ description: Workflow for the GammaRips options-flow MCP server — read the cur
 
 # GammaRips options-flow analysis
 
-GammaRips is an anti-firehose options-flow **data vendor**, not a signal service.
-Every trading morning (~05:30 ET) its engine scans ~5,000 US equities for unusual
-options activity and curates hard — down to a small high-signal BULLISH candidate
-pool with point-in-time features, realized **opportunity surfaces** (max-favorable /
+GammaRips is an options-flow **data vendor**, not a signal service.
+Every trading night its engine ranks 3,532 optionable US names by liquidity, takes
+the top 100, keeps the bullish ones, and prices one out-of-the-money call in each.
+That is a pool of roughly 40 to 50 contracts an agent can actually trade, with
+point-in-time features, realized **opportunity surfaces** (max-favorable /
 max-adverse excursions with no exit applied), bracket outcome labels, and
 methodology playbooks.
+
+These are not claimed to be the best contracts. Two pre-registered studies found
+the pool indistinguishable from matched random optionable contracts. What the
+liquidity rule measurably fixes is executability: on a 60-day window ending
+2026-08-14, no-fill at 10:00 ET went from 40.5% to 6.1%. Those are study numbers,
+not a live property of the pool.
 
 **The contract of this data: there is no pick endpoint.** The server hands you
 primitives; you reason from them to your own contract and your own exit. Never

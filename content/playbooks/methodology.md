@@ -24,14 +24,15 @@ is **exit-conditional** — read each note's `Exit-context` before citing it.
 - [[opportunity-surface]] — architecture-fact — MFE/MAE excursions recorded with NO exit applied, so the exit stays a free variable
 
 ## Findings — tested on our cohorts
-- [[bullish-direction-asymmetry]] — proven-on-cohort — bullish carried the EV, bearish destroyed it (+4.11 vs -7.71/trade, 3-day era)
+- [[bullish-direction-asymmetry]] — architecture-fact — the reason the funnel is bullish-only (+4.11 vs -7.71/trade, 3-day era); the pool holds no bearish arm now, so this is not re-runnable in-pool and is not a selector
 - [[delta-band-0-20-0-46]] — proven-on-cohort — mid |delta| 0.20-0.46 is the only feature separating winners from losers
 - [[option-pnl-not-underlying]] — proven-on-cohort — evaluate on option PnL, never underlying direction (54% vs 41%)
 - [[fixed-exit-composites-negative]] — proven-on-cohort — the whole pool under any fixed exit is negative; the exit is the free variable
 - [[pool-delta-calibrated]] — proven-on-cohort — pool expires ITM at the delta-implied rate; zero directional alpha, all ROI is in the trading layer
 - [[path-calibrated-giveback]] — proven-on-cohort — excursion peaks match entry IV and arrive LATE; the verified edge surface is the giveback
 - [[three-day-harvest-curve]] — proven-on-cohort — P(touch +20% in 3d)=51%, pops land day 2-3, fixed targets are EV-negative pool-wide
-- [[moneyness-10-15-otm]] — proven-on-cohort — 10-15% OTM was the best moneyness bucket
+- [[selection-research-closed]] — falsified-on-cohort — READ THIS FIRST: the pool is indistinguishable from matched random optionable contracts (2 pre-registered studies, 87 and 57 days); pool membership is not evidence a contract is good
+- [[moneyness-10-15-otm]] — falsified-on-cohort — did NOT replicate (n=1,806, halves flip sign); moneyness is descriptive only and never filters or ranks, at any band
 - [[mom-60-conditional-lever]] — fragile-conditional — 60-day momentum x delta band works ONLY multi-day; zero edge same-day
 - [[voi-ratio-anti-edge]] — falsified-on-cohort — V/OI > 2 filters remove winners
 - [[oi-not-quality-signal]] — falsified-on-cohort — higher OI monotonically worse; OI/volume are session-frozen anyway

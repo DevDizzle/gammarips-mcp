@@ -1,6 +1,8 @@
 # Start Here — What This Server Is (and Deliberately Isn't)
 
-GammaRips is an overnight options-flow intelligence engine. Every trading morning it scans the US options market for unusual institutional activity and curates it *hard* — from thousands of names down to a small high-signal BULLISH pool (~50 candidates). This MCP server gives your agent that pool, the point-in-time features behind it, and the realized outcome/opportunity history to reason against.
+GammaRips is an overnight options-flow data engine. Every trading night it ranks 3,532 optionable US names by liquidity, takes the top 100, keeps the bullish ones, and prices one out-of-the-money call in each. That is a pool of roughly 40 to 50 contracts. This MCP server gives your agent that pool, the point-in-time features behind it, and the realized outcome/opportunity history to reason against.
+
+**The pool is not a list of the best contracts, and we do not claim it is.** Two pre-registered studies on 2026-08-22 found it indistinguishable from matched random optionable contracts on the same tape. What the liquidity rule measurably fixes is executability: on a 60-day window ending 2026-08-14, no-fill at 10:00 ET went from 40.5% to 6.1%. Those are study numbers, not a live property of today's pool. The full null results are in `get_playbook("selection-research-closed")`. Read it before you build anything on the pool.
 
 **What you get:**
 - **The curated pool** — today's enriched candidates with narrative context (`get_enriched_signals`, `get_signal_detail`) and historical point-in-time feature vectors (`get_pool_features`).

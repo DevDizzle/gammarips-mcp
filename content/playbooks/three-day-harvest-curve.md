@@ -7,9 +7,15 @@ Date: 2026-07-06
 
 # The 3-day harvest curve — real, late, and not rule-able
 
-Within 3 days of entry the pool's pop is real: **P(touch +20%) = 51%, +50% = 31%,
-+100% = 14%; median peak +21%**. But three corrections to the "get in day 1, take your
-target" intuition:
+> **Cohort bound (2026-08-25):** measured on the pre-2026-08-25 pool, which was selected
+> on unusual activity. The funnel now selects on liquidity. The curve held on the
+> population it was tested on. It is a property of the contracts, NOT evidence that pool
+> membership causes the pop: a pre-registered study on 2026-08-22 found the pool
+> indistinguishable from matched random optionable contracts ([[selection-research-closed]]).
+
+Within 3 days of entry the excursion on these contracts is real: **P(touch +20%) = 51%,
++50% = 31%, +100% = 14%; median peak +21%**. But three corrections to the "get in day 1,
+take your target" intuition:
 
 1. **The pop comes LATE.** Given a peak ≥ +20%, it lands day-1 only 15% of the time,
    day-3 52%. Only 9% of the pool clears +15% on day one. Plan for day 2–3, not hours.

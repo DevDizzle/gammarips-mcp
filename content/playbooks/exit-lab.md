@@ -1,3 +1,6 @@
+Exit-context: MIXED — every numbered finding below states its own horizon. Items 1, 2 and 6 are to-expiry. Items 3, 4 and 5 are the 3-trading-day window from the 10:00 ET entry. Do not read a number here without its horizon.
+Cohort: all figures below were measured on the pre-2026-08-25 pool, selected on unusual activity. The funnel now selects on liquidity.
+
 # Exit Lab — Exploring the Exit Space Honestly
 
 The most important fact in this dataset: **the same pool of contracts is negative under a fixed exit and rich in favorable excursion before resolution.** Average same-day bracket outcome is negative; average max-favorable excursion (MFE) over 3 trading days is strongly positive. The gap between those two numbers *is* the product — and it's closed (or not) by exit discipline.
@@ -11,10 +14,12 @@ arc — these re-run as eras accrue. The
 numbers below include the unflattering ones on purpose; that is the point of
 a research subscription.
 
-1. **Delta is your base rate.** Realized ITM-at-expiration was 41.3% vs a mean
-   scan-time |delta| of 42.1% (N=2,146). The pool converts to ITM at the
-   market-implied rate — selection curates *which* fairly-priced contracts you
-   see; it does not find direction the market missed.
+1. **Delta is your base rate.** *(to-expiry)* Realized ITM-at-expiration was
+   41.3% vs a mean scan-time |delta| of 42.1% (N=2,146). The pool converts to
+   ITM at the market-implied rate — selection curates *which* fairly-priced
+   contracts you see; it does not find direction the market missed. That last
+   clause is a principle and holds under any hold period. The 41.3% does not:
+   it is an at-expiration number.
 2. **The path is fairly priced too.** Realized excursion peaks sit at the
    ~51st percentile of each contract's own entry-IV-implied distribution
    (N=1,303). The peaks are big (p90 peak ≈ +445% to expiry) — and exactly as
@@ -22,10 +27,13 @@ a research subscription.
 3. **The harvest curve** (3-trading-day window, touch-based ceiling, N=2,029):
    P(touch +15%) = 55%, +20% = 51%, +50% = 31%, +100% = 14%; median peak +21%.
    Serve it live, with your own filters, via `get_harvest_curve`.
-4. **The pops come late.** Given a peak ≥ +20%, it lands day 1 only ~15% of
-   the time and day 3 ~52%. "Take a quick profit hours after entry" is the
-   exception, not the pattern.
-5. **Fixed targets tested EV-negative at every level** (−7.2%/trade at +20%,
+4. **The pops come late.** *(3-trading-day window)* Given a peak ≥ +20%, it
+   lands day 1 only ~15% of the time and day 3 ~52%. "Take a quick profit hours
+   after entry" is the exception, not the pattern. Note that the live paper
+   policy exits same day, so this finding describes a window wider than that
+   policy uses.
+5. **Fixed targets tested EV-negative at every level** *(3-trading-day window)*
+   (−7.2%/trade at +20%,
    still −2.4% at +80%): the ~half that never pops loses ~35% by window end,
    and a cheap target amputates the right tail that pays for it. EV improves
    monotonically as the target rises. Also: a −30% drawdown is touched on
