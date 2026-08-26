@@ -88,20 +88,24 @@ def get_pool(
     """
     The GammaRips candidate pool for a scan date. One tool, four `view`s:
 
-      * view="enriched" (DEFAULT) — the curated AI-enriched pool: news,
-        technicals, catalyst, a delta-targeted recommended contract, and the
-        60-day momentum feature `mom_60`. Enrichment gate: overnight_score>=1
-        AND directional UOA>$500K, edge-ranked to the top ~50 BULLISH names
-        (the score floor is cosmetic; the UOA bar, the BULLISH gate, and
-        the top-50 cap do the filtering).
+      * view="enriched" (DEFAULT) — the AI-enriched pool: news, technicals,
+        catalyst, the recommended contract (an OTM call chosen on contract
+        liquidity), and the 60-day momentum feature `mom_60`. Funnel for
+        scan_date >= 2026-08-24 (liquid-universe era): the 100 most liquid
+        optionable names, BULLISH only, one call each, roughly 40-50 rows.
+        Liquidity decides membership, not unusual activity; the $500K UOA
+        floor is retired and `overnight_score>=1` is a cosmetic floor.
+        Earlier scan dates come from the prior UOA-gated funnel (UOA>$500K,
+        top-50 BULLISH); the two eras are not one population.
         This is the daily candidate set your agent reasons over to its OWN
         contract (see get_playbook("run-your-own-tournament")). Served from a
         leakage-safe view (forward-outcome columns physically stripped);
         `summary=True` gives ~21 decision columns, `fields=[...]` a strict
         projection, `summary=False` full rows, `offset` pages.
-      * view="raw" — the wide pre-curation overnight scan (where unusual
-        options activity concentrated across the whole universe, BEFORE
-        curation). Honors `direction`, `min_score`, `ticker`, `limit`.
+      * view="raw" — the wide overnight scan BEFORE the pool cut (the ranked
+        liquid universe for scan_date >= 2026-08-24; the market-wide
+        unusual-activity scan for earlier dates). Honors `direction`,
+        `min_score`, `ticker`, `limit`.
       * view="features" — point-in-time FEATURE VECTORS from the leakage-safe
         allowlist view `enriched_features_v1` (identity + features + cohort
         metadata only; no outcome/label/telemetry column can appear). The

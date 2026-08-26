@@ -33,18 +33,19 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
     "overnight_score": {
         "label": "Overnight Score",
         "definition": (
-            "A 1-10 conviction score the overnight scanner assigns to each "
+            "A 1-10 score the overnight scanner assigns to each "
             "ticker based on options-flow concentration, directional UOA, and "
             "implied-vol regime."
         ),
         "how_used": (
-            "Enrichment requires score >= 1 plus directional UOA > $500K. The "
-            "score floor is cosmetic: the UOA bar, the BULLISH-only gate, and "
-            "the top-50 cap do the filtering. The engine's own daily selection is "
-            "drawn from this pool after the BULLISH-only gate, a delta edge-rank "
-            "to the top ~50, two safety rails (no earnings in the exclusion "
-            "window; VIX ≤ VIX3M), and a randomized 3-bracket consensus "
-            "tournament (a pattern your agent can run itself — see "
+            "Era-dependent. For scan_date >= 2026-08-24 the score is descriptive "
+            "context only: membership comes from the liquidity rank (top-100 "
+            "liquid names, BULLISH only), the $500K UOA floor is retired, and "
+            "score >= 1 is a cosmetic floor. On earlier rows the UOA bar, the "
+            "BULLISH-only gate, and the top-50 cap did the filtering. The two "
+            "safety rails (no earnings in the exclusion window; VIX <= VIX3M) "
+            "and the randomized 3-bracket consensus tournament still run "
+            "downstream (a pattern your agent can run itself: see "
             "get_playbook('run-your-own-tournament'))."
         ),
     },
@@ -168,18 +169,20 @@ _FIELD_EXPLANATIONS: dict[str, dict[str, str]] = {
             "options activity."
         ),
         "how_used": (
-            "V6 enrichment requires directional UOA > $500K. Filters out "
-            "low-conviction or coincidentally-traded names. Calls drive the live "
-            "BULLISH-only strategy."
+            "Era-dependent gate. Rows with scan_date before 2026-08-24 required "
+            "directional UOA > $500K to enter the pool. Since 2026-08-24 the "
+            "floor is retired and liquidity decides membership, so this column "
+            "is context, not a gate. Calls drive the live BULLISH-only strategy."
         ),
     },
     "put_dollar_volume": {
         "label": "Put Dollar Volume (Directional UOA)",
         "definition": "Today's notional dollar volume in puts. Bearish-direction analog of call_dollar_volume.",
         "how_used": (
-            "Same $500K enrichment threshold as call_dollar_volume. NOTE: the live "
-            "V6 strategy trades BULLISH calls only, so put-side rows appear in "
-            "historical data but are not currently selectable."
+            "Same era rule as call_dollar_volume: the $500K threshold applied "
+            "before 2026-08-24 and is retired since. The live strategy trades "
+            "BULLISH calls only, so put-side rows appear in historical data but "
+            "are not currently selectable."
         ),
     },
     "vix3m_at_enrich": {
