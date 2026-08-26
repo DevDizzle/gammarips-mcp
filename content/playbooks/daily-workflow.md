@@ -34,7 +34,7 @@ get_opportunity_surface(days=30)  → recent excursion structure of the pool
 
 **3.5 Refresh liquidity on your shortlist — the pool's numbers are stale by design.**
 ```
-get_contract_snapshot(recommended_contract)
+get_liquidity(contract=recommended_contract, live=True)
                                   → fresh OI, session volume, last trade, day range
 ```
 `recommended_oi`/`recommended_volume` are scan-frozen; the overnight sweep only
@@ -55,6 +55,6 @@ get_historical_performance()      → cohort aggregate
 The engine's own daily selection is intentionally NOT published same-day. Realized rows appear after exit.
 
 ## Caveats that bite
-- `recommended_oi` / `recommended_volume` are **session-frozen snapshots** from scan time, not live values. Overnight sweeps typically become visible OI only the *next* morning. Re-check with `get_contract_snapshot` before acting on size.
+- `recommended_oi` / `recommended_volume` are **session-frozen snapshots** from scan time, not live values. Overnight sweeps typically become visible OI only the *next* morning. Re-check with `get_liquidity` before acting on size.
 - `recommended_spread_pct` is permanently NULL (no options NBBO on the current data plan). Check spreads with your own broker/data feed.
-- Earnings: the engine excludes names with earnings inside its hold window (IV crush is literature-settled). If you hold longer than same-day, re-check the earnings calendar for your horizon yourself.
+- Earnings: the pool is NOT earnings-screened. The engine's earnings exclusion runs only at its own cohort's entry, after the pool publishes. Whatever your hold, verify each candidate's earnings date against your horizon with `get_signal(view="earnings")` before acting (IV crush is literature-settled; see [[earnings-exclusion-rail]]).
