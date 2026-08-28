@@ -37,7 +37,7 @@ live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
 
 **Free tier** (no key): `get_pool`, `get_regime_context`,
 `get_market_calendar_status`, `get_playbook`, `get_daily_report`.
-**Pro tier** (Agent Access, $39/mo key): `get_signal`, `get_liquidity`,
+**Pro tier** (Agent Access, $29/mo key): `get_signal`, `get_liquidity`,
 `query_outcomes`, `replay_contract`.
 
 - `get_pool` **(free)** — the candidate pool: `view="enriched"` (curated
@@ -192,7 +192,7 @@ Omit `headers` for the free tier (5 anon tools).
 
 Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
 
-Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($39/mo) — generate a key at [gammarips.com](https://gammarips.com/pricing), or connect through `/pro` and sign in.
+Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($29/mo, 30-day free trial) — generate a key at [gammarips.com](https://gammarips.com/pricing), or connect through `/pro` and sign in.
 
 ## Local development
 

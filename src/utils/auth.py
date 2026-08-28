@@ -57,8 +57,9 @@ ACCOUNT_URL = "https://gammarips.com/account?utm_source=mcp_denial"
 DEVELOPERS_URL = "https://gammarips.com/developers?utm_source=mcp_denial"
 # Shown verbatim in the denial envelope. MUST match the live pricing page
 # (same-day price-sync rule): change here and in the webapp together.
-PRICE = "$39/month"
-TRIAL = "7-day free trial"
+# 2026-08-28: founding offer live ($29/mo first 100, 30-day trial, $299/yr).
+PRICE = "$29/month"
+TRIAL = "30-day free trial"
 
 # Rollout modes
 MODE_OFF = "off"
