@@ -2,6 +2,15 @@
 
 Dated record of changes that affect how you should interpret the data. Re-check this playbook periodically; it is the subscription's "what moved" feed.
 
+## 2026-08-28 — Server 4.3.0: connect-time guidance; playbooks cite V4 names
+- The server now returns `instructions` in the initialize result: what is free, what is Pro, and how a human subscribes. No tool or data change.
+- The playbooks now cite the V4 tool + view forms everywhere (this changelog keeps historical names in dated entries). `start-here` gains a "How access works" section.
+
+## 2026-08-25 — LIQUID-UNIVERSE funnel; live cohort RESET to 2026-08-25
+- **The pool is now selected by liquidity.** Each trading night the engine ranks about 3,500 optionable US names by combined liquidity (z of option-chain dollar volume + z of share volume), keeps the top 100, keeps the bullish names, and prices one OTM call per name. The $500K unusual-activity dollar floor is gone: flow gives context, liquidity decides membership.
+- **Why: executability, not edge.** On a 60-trading-day study window ending 2026-08-14, the prior funnel left 40.5% of pool legs with no fill at the 10:00 ET entry anchor; the liquid universe measured 6.1%. Study numbers, not a live property of today's pool. Selection research is CLOSED (two pre-registered studies, 2026-08-22): the pool measures indistinguishable from matched random optionable contracts, so no selection-edge claim attaches to this change — see `get_playbook("selection-research-closed")`.
+- **Receipts reset again.** The live cohort pair is now `policy_version='V7_1_TILTED_GIGO'` AND entry on/after `2026-08-25`. Exit mechanics are unchanged. As always, `total_trades: 0` with `null` aggregates means "not accrued yet", never a zero win rate. No truncation: earlier rows stay reachable under earlier date windows.
+
 ## 2026-08-10 — Live cohort RESET to 2026-08-10; receipts restart at zero (applied 2026-08-07)
 - **The receipts views return `total_trades: 0` / `row_count: 0` until the new cohort accrues closed trades.** That is a cohort reset, not missing data and not a zero win rate. Aggregate stats (`win_rate`, `avg_return`, `best`, `worst`) come back `null` at N=0 — deliberately NOT `0.0`, because an invented zero is worse than an absent number.
 - **The cohort is a PAIR, not a label.** It is `policy_version='V7_1_TILTED_GIGO'` **AND** entry on/after `2026-08-10`. Responses now carry a `cohort_start` field. The ledger keeps earlier cohorts under the same policy label, because resets since 2026-07-28 are date-filter resets rather than truncations — so filtering on the label alone silently mixes in disowned rows.

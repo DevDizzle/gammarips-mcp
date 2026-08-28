@@ -56,7 +56,10 @@ logger = logging.getLogger(__name__)
 # 4.2.0 (2026-08-19): OAuth 2.1 resource server. `/pro` = auth-required MCP endpoint
 # (401 + RFC 9728 discovery for chat clients), `/mcp` unchanged (anonymous), JWT
 # bearers honored everywhere API keys are. No tool or data change.
-SERVER_VERSION = "4.2.0"
+# 4.3.0 (2026-08-28): connect-time `instructions` in the initialize result
+# (/mcp + /jsonrpc): free/pro tiers + signup steps. Playbooks cite V4 tool
+# names; start-here gains a "How access works" section. No tool or data change.
+SERVER_VERSION = "4.3.0"
 
 # Connect-time guidance, served in the initialize result. This is the
 # proactive half of the funnel; the denial envelope in utils.auth is the
