@@ -28,6 +28,12 @@
 
 set -e  # Exit on error
 
+# Deploy THIS repo, never the caller's working directory. `--source=.` uploads
+# $PWD: a run from another directory would ship that directory as the service
+# (it happened 2026-08-28 — the harness repo went up as the MCP source and only
+# failed because it has no Python entrypoint).
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Configuration
 PROJECT_ID="${GCP_PROJECT_ID:-profitscout-fida8}"
 REGION="${GCP_REGION:-us-central1}"
