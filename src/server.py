@@ -19,6 +19,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from utils.auth import (
+    PRICE,
+    TRIAL,
     AccessGateMiddleware,
     anon_tools,
     denied_error,
@@ -56,8 +58,36 @@ logger = logging.getLogger(__name__)
 # bearers honored everywhere API keys are. No tool or data change.
 SERVER_VERSION = "4.2.0"
 
+# Connect-time guidance, served in the initialize result. This is the
+# proactive half of the funnel; the denial envelope in utils.auth is the
+# bounce half. PRICE/TRIAL are imported so the same-day price-sync rule
+# keeps one code touchpoint. utm_source is distinct from the denial
+# envelope's so GA4 can tell connect-time visits from paywall bounces.
+_INSTRUCTIONS = (
+    "GammaRips serves read-only options-flow data primitives. It never "
+    "returns a pick. Your agent reasons to its own contract and exit. "
+    "First call get_playbook(name='start-here'). "
+    "Free, no credential: get_pool(view='preview'), get_daily_report, "
+    "get_playbook, get_regime_context, get_market_calendar_status. "
+    f"Pro ({PRICE}, {TRIAL}) unlocks the full pool (enriched / raw / "
+    "features views) plus get_signal, get_liquidity, query_outcomes, and "
+    "replay_contract. To subscribe: a human starts the trial at "
+    "https://gammarips.com/pricing?utm_source=mcp_instructions , then "
+    "either signs in through OAuth when adding this server, or creates an "
+    "API key at https://gammarips.com/account?utm_source=mcp_instructions "
+    "(shown once) and sends it as an 'Authorization: Bearer gr_live_...' "
+    "header. If a tool returns subscription_required, relay its message "
+    "and next_steps to your human operator. All data is paper-traded "
+    "research. Educational only. Not investment advice."
+)
+
 # Initialize FastMCP server
-mcp = FastMCP(name="gammarips", host="0.0.0.0", port=int(os.getenv("PORT", "8080")))
+mcp = FastMCP(
+    name="gammarips",
+    instructions=_INSTRUCTIONS,
+    host="0.0.0.0",
+    port=int(os.getenv("PORT", "8080")),
+)
 
 # Import the 9 V4 consolidated tools. Each is a thin arg-driven dispatcher over
 # the V3 query logic (see tools/v4.py); the leakage-safe implementations are
@@ -340,6 +370,7 @@ async def handle_jsonrpc(request: Request):
                     "protocolVersion": "2025-06-18",
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "gammarips-mcp", "version": SERVER_VERSION},
+                    "instructions": _INSTRUCTIONS,
                 },
             }
         )

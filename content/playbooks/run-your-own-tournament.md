@@ -6,7 +6,7 @@ Why a tournament instead of "score every candidate 1-10"? Absolute scores from a
 
 ## The pattern
 
-**Inputs:** today's pool (`get_enriched_signals`), any context you want the judge to see (e.g. `get_daily_report()`, `get_regime_context()`), and your objective statement.
+**Inputs:** today's pool (`get_pool()`), any context you want the judge to see (e.g. `get_daily_report()`, `get_regime_context()`), and your objective statement.
 
 **One bracket:**
 1. Shuffle the pool randomly.

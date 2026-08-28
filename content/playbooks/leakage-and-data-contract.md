@@ -16,7 +16,7 @@ Every column carries one of five classifications, each with an **as-of boundary*
 The rule in one line: **a feature is something knowable at ≤ scan_date.** Anything realized after entry — labels, excursions, entry-day-close regime values — describes the future relative to selection. Conditioning selection on it is lookahead, full stop.
 
 ## How the server enforces this physically
-- `get_pool_features` serves an **allowlist view**: only identity + feature + cohort-meta columns exist in it. New columns are excluded until deliberately classified — the failure mode is a missing column, never a leaked one.
+- `get_pool(view="features")` serves an **allowlist view**: only identity + feature + cohort-meta columns exist in it. New columns are excluded until deliberately classified — the failure mode is a missing column, never a leaked one.
 - `query_outcomes` joins labels onto that same view (labels arrive *labeled as labels*, never mixed into the feature vector).
 - Live-pool tools serve a view that physically strips the forward-outcome columns the outcome tracker writes back upstream.
 - Realized data is only served for **closed** windows.

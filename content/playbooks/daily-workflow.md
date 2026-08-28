@@ -19,17 +19,18 @@ The engine fail-closes on VIX backwardation (spot VIX > VIX3M). Your agent can t
 
 **2. Pull the pool.**
 ```
-get_enriched_signals()            → today's curated candidates + narrative
-get_freemium_preview()            → quick teaser view
+get_pool()                        → today's curated candidates + narrative
+get_pool(view="preview")          → quick teaser view (free tier)
 ```
 Each row carries the contract the engine's enrichment selected (delta-targeted, short-DTE), flow context (directional dollar volume), technicals, catalyst notes, and a thesis. The pool is BULLISH-only by current policy.
 
 **3. Get quantitative context per candidate.**
 ```
-get_signal_detail(ticker)         → full enrichment for one name
-get_outcome_summary(horizon="3d", group_by="delta_bucket")
+get_signal(ticker=...)            → full enrichment for one name
+query_outcomes(view="summary", horizon="3d", group_by="delta_bucket")
                                   → how similar contracts resolved historically
-get_opportunity_surface(days=30)  → recent excursion structure of the pool
+query_outcomes(view="surface", days=30)
+                                  → recent excursion structure of the pool
 ```
 
 **3.5 Refresh liquidity on your shortlist — the pool's numbers are stale by design.**
@@ -45,12 +46,14 @@ bid/ask/spread on the current data plan — the field is absent, not broken.)
 Run your own ranking, or the bracket-tournament pattern (`get_playbook("run-your-own-tournament")`). Diversity of selection across subscribers is a feature: the primitives are shared, the conclusions are yours.
 
 **5. Decide the exit BEFORE entry.**
-Use `get_harvest_curve(targets=[...])` for touch probabilities and peak timing, `estimate_exit_rule(target_pct=..., stop_pct=...)` to classify your bracket against the surface, and `get_playbook("exit-lab")` for the measured facts (fixed targets tested EV-negative pool-wide; pops land day 2-3; the giveback is large). The single most robust finding in our research: outcomes are decided by exit discipline more than by selection.
+Use `query_outcomes(view="harvest", targets=[...])` for touch probabilities and peak timing, `query_outcomes(view="exit_rule", target_pct=..., stop_pct=...)` to classify your bracket against the surface, and `get_playbook("exit-lab")` for the measured facts (fixed targets tested EV-negative pool-wide; pops land day 2-3; the giveback is large). The single most robust finding in our research: outcomes are decided by exit discipline more than by selection.
 
 **6. After the fact — check receipts, never same-day.**
 ```
-get_position_history(days=30)     → the engine's realized paper trades (T+1)
-get_historical_performance()      → cohort aggregate
+query_outcomes(view="positions", days=30)
+                                  → the engine's realized paper trades (T+1)
+query_outcomes(view="performance")
+                                  → cohort aggregate
 ```
 The engine's own daily selection is intentionally NOT published same-day. Realized rows appear after exit.
 

@@ -5,17 +5,23 @@ GammaRips is an overnight options-flow data engine. Every trading night it ranks
 **The pool is not a list of the best contracts, and we do not claim it is.** Two pre-registered studies on 2026-08-22 found it indistinguishable from matched random optionable contracts on the same tape. What the liquidity rule measurably fixes is executability: on a 60-day window ending 2026-08-14, no-fill at 10:00 ET went from 40.5% to 6.1%. Those are study numbers, not a live property of today's pool. The full null results are in `get_playbook("selection-research-closed")`. Read it before you build anything on the pool.
 
 **What you get:**
-- **The curated pool** — today's enriched candidates with narrative context (`get_enriched_signals`, `get_signal_detail`) and historical point-in-time feature vectors (`get_pool_features`).
-- **The opportunity surface** — for every pool contract, the realized max-favorable / max-adverse excursion of the option premium over a 3-trading-day window with NO exit applied (`get_opportunity_surface`). Profit *potential*, with the exit left as a free variable.
-- **Realized labels** — how every pool contract resolved under two reference brackets: the live same-day GIGO bracket and a 3-day companion (`query_outcomes`, `get_outcome_summary`).
-- **Exit exploration** — score *your* bracket against the surface (`estimate_exit_rule`).
+- **The curated pool** — today's enriched candidates with narrative context (`get_pool(view="enriched")`, `get_signal(ticker=...)`) and historical point-in-time feature vectors (`get_pool(view="features")`).
+- **The opportunity surface** — for every pool contract, the realized max-favorable / max-adverse excursion of the option premium over a 3-trading-day window with NO exit applied (`query_outcomes(view="surface")`). Profit *potential*, with the exit left as a free variable.
+- **Realized labels** — how every pool contract resolved under two reference brackets: the live same-day GIGO bracket and a 3-day companion (`query_outcomes(view="labels")`, `query_outcomes(view="summary")`).
+- **Exit exploration** — score *your* bracket against the surface (`query_outcomes(view="exit_rule")`).
 - **Regime + safety context** — `get_regime_context`, `get_market_calendar_status`.
-- **Receipts** — the engine's own paper-traded track record, realized rows only (`get_position_history`, `get_historical_performance`). The live cohort was RESET on 2026-08-10, so expect near-zero N for now: `total_trades: 0` with `null` aggregates means "not accrued yet", not a 0% win rate. See `get_playbook("changelog")`.
+- **Receipts** — the engine's own paper-traded track record, realized rows only (`query_outcomes(view="positions")`, `query_outcomes(view="performance")`). The live cohort was RESET on 2026-08-25 when the liquid-universe funnel went live, so expect near-zero N for now: `total_trades: 0` with `null` aggregates means "not accrued yet", not a 0% win rate. See `get_playbook("changelog")`.
 - **Methodology** — these playbooks, versioned server-side.
 
 **What this server will never do:**
 - **Return a pick.** There is no "what should I buy today" endpoint, by design. Every subscriber's agent reasons from the same primitives to its *own* contract and its *own* exit. That keeps flow diffuse (nobody stampedes one thin contract) and keeps this a data product, not investment advice.
-- **Sell you a return.** The whole pool traded under any one fixed exit is *negative* on average — we publish that openly (`get_outcome_summary`). The value is the excursion structure inside the pool: contracts routinely trade through large favorable excursions before resolving. How much of that your agent captures is a function of *its* selection and *its* exit discipline.
+- **Sell you a return.** The whole pool traded under any one fixed exit is *negative* on average — we publish that openly (`query_outcomes(view="summary")`). The value is the excursion structure inside the pool: contracts routinely trade through large favorable excursions before resolving. How much of that your agent captures is a function of *its* selection and *its* exit discipline.
+
+**How access works (free vs Pro):**
+- Free, no credential: `get_pool(view="preview")`, `get_daily_report`, `get_playbook`, `get_regime_context`, `get_market_calendar_status`.
+- Pro unlocks the full pool (`view="enriched"` / `"raw"` / `"features"`) plus `get_signal`, `get_liquidity`, `query_outcomes`, and `replay_contract`.
+- To subscribe, a human starts the trial at https://gammarips.com/pricing?utm_source=mcp_playbook . Then either sign in with OAuth when adding this server (Claude, ChatGPT, Cursor — Pro applies on the next token refresh or on reconnect), or create an API key at https://gammarips.com/account (the key is shown once) and send it as an `Authorization: Bearer gr_live_...` header.
+- If a Pro tool returns `subscription_required`, relay its `message` and `next_steps` to your human operator. Setup docs: https://gammarips.com/developers .
 
 **Where to go next:**
 1. `get_playbook("daily-workflow")` — the morning pattern.
