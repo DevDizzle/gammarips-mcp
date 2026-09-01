@@ -11,9 +11,12 @@ dependencies = [
     "google-cloud-firestore>=2.11.0",
     "httpx>=0.24.0",
     # src/server.py imports `mcp.server.fastmcp` and `mcp.types` directly.
-    # Pulled in by `fastmcp`, pinned here so the dependency is explicit and so
-    # the build cannot resolve an SDK too old for tool `title` / annotations.
-    "mcp>=1.25.0",
+    # Pulled in by `fastmcp`, pinned here so the dependency is explicit.
+    # The UPPER bound is load-bearing: mcp 2.x renamed FastMCP to MCPServer and
+    # `mcp.server.fastmcp` no longer exists, so an unbounded pin resolves to 2.x
+    # and the container dies on import (rev 00051-b25, 2026-09-01). The lower
+    # bound guarantees tool `title` + annotations support.
+    "mcp>=1.25.0,<2",
     "pandas-market-calendars>=4.4.0",
     "pydantic>=2.0.0",
     # OAuth 2.1 resource server (utils/oauth.py): RS256 access-token verification.
