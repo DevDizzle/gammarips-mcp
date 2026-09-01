@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # 4.3.0 (2026-08-28): connect-time `instructions` in the initialize result
 # (/mcp + /jsonrpc): free/pro tiers + signup steps. Playbooks cite V4 tool
 # names; start-here gains a "How access works" section. No tool or data change.
-SERVER_VERSION = "4.4.0"
+SERVER_VERSION = "4.5.0"
 
 # Connect-time guidance, served in the initialize result. This is the
 # proactive half of the funnel; the denial envelope in utils.auth is the

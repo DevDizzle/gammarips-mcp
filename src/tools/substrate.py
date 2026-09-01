@@ -374,7 +374,8 @@ def get_opportunity_surface(
                               SELECT COUNT(*) FROM sessions s
                               WHERE s.d > o.entry_day
                                 AND s.d < CURRENT_DATE('America/New_York')
-                            ) >= IFNULL(o.opp_window_days, 3) - 1 AS window_closed
+                            ) AS elapsed_sessions,
+                            IFNULL(o.opp_window_days, 3) AS win_days
                           FROM {_OUTCOMES_TABLE} o
                           WHERE {where_window}
                         )
@@ -383,7 +384,31 @@ def get_opportunity_surface(
                           MAX(scan_date) AS newest_scan_date,
                           COUNT(DISTINCT IF(pending, scan_date, NULL)) AS pending_scan_dates,
                           MIN(IF(pending, scan_date, NULL)) AS first_pending_scan_date,
-                          COUNTIF(pending AND window_closed) AS open_past_due,
+                          -- PAST DUE needs the fill job to have HAD A CHANCE.
+                          -- A window that closes today is closed from midnight
+                          -- ET, but `pool-outcomes-refresh` does not run until
+                          -- 17:20 ET, so counting it immediately told every
+                          -- paying subscriber the pipeline was broken, every
+                          -- weekday, until the evening. Design lag is not a
+                          -- stall. So: only past due once ANOTHER session has
+                          -- elapsed (the cron certainly ran), or it is past
+                          -- FILL_GRACE_ET today (the cron should have run).
+                          COUNTIF(
+                            pending
+                            AND elapsed_sessions >= win_days - 1
+                            AND (
+                              elapsed_sessions >= win_days
+                              OR CURRENT_TIME('America/New_York') >= TIME '18:00:00'
+                            )
+                          ) AS open_past_due,
+                          -- Closed-but-waiting-on-tonight's-cron. Reported so a
+                          -- reader can tell "not yet filled" from "never will".
+                          COUNTIF(
+                            pending
+                            AND elapsed_sessions >= win_days - 1
+                            AND elapsed_sessions < win_days
+                            AND CURRENT_TIME('America/New_York') < TIME '18:00:00'
+                          ) AS open_awaiting_fill,
                           (SELECT max_session FROM cal) AS calendar_max_session,
                           (SELECT max_gap FROM cal) AS calendar_max_gap_days,
                           -- NULL-safe and defaults UNUSABLE. An empty calendar
@@ -447,11 +472,22 @@ def get_opportunity_surface(
                     # "newer than the closed frontier (None)" is garbled.
                     _cf = frontier.get("closed_frontier")
                     _rel = f" newer than the closed frontier ({_cf})" if _cf else ""
+                    _await = frontier.get("open_awaiting_fill") or 0
+                    # Distinguish "window still open" from "window closed today,
+                    # tonight's 17:20 ET fill has not run yet". Both are healthy,
+                    # but collapsing them made the second look like the first and
+                    # left a reader unable to tell when to expect the data.
+                    _await_clause = (
+                        f" {_await} row(s) closed today and are waiting on tonight's "
+                        "17:20 ET fill job."
+                        if _await
+                        else ""
+                    )
                     frontier["note"] = (
                         f"{frontier['pending_scan_dates']} scan date(s){_rel} are pending, "
                         f"starting {frontier.get('first_pending_scan_date')}. Verified: 0 "
-                        "of them are past due, so their excursion window genuinely has not "
-                        "closed and they will fill on their own. Pass include_open=True to "
+                        "of them are past due, so nothing is stalled and they will fill on "
+                        f"their own.{_await_clause} Pass include_open=True to "
                         "see them; every opp_* VALUE column (peak/trough/minutes/bar_count/"
                         "entry price and timestamp) is NULL until the window closes, though "
                         "opp_window_days and opp_sim_version are populated."

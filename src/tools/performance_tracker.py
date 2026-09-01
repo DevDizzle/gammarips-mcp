@@ -66,9 +66,11 @@ def get_signal_performance(
         limit: Max results (default 50).
 
     Returns:
-        {universe, basis, note, rows: [{ticker, direction, score, entry_price,
-         current_price, underlying_pct_change, underlying_direction_outcome,
-         scan_date}]} — field names carry the universe on purpose.
+        {universe, basis, note, row_count, matched_rows, truncated,
+         rows: [{ticker, direction, score, entry_price, current_price,
+         underlying_pct_change, underlying_direction_outcome, scan_date}]} —
+         field names carry the universe on purpose. Check `truncated` before
+         computing any statistic: the cap cuts mid-scan_date on score.
     """
     if not client:
         return {"error": "BigQuery client not initialized"}
@@ -107,6 +109,30 @@ def get_signal_performance(
             base_query += " AND is_win = @is_win"
             query_params.append(bigquery.ScalarQueryParameter("is_win", "BOOL", is_win_val))
 
+        # How many rows the filters actually match, BEFORE the cap. Without
+        # this the caller gets N rows and cannot tell N was the whole answer or
+        # the top of a longer one. The sort is `scan_date DESC, score DESC`, so
+        # a truncated response ends mid-scan_date on SCORE: its oldest date is a
+        # highest-score-only slice, and any statistic over it is biased upward.
+        # Same defect class as the 200-row query_outcomes truncation.
+        count_query = (
+            "SELECT COUNT(*) AS n FROM ("
+            + base_query
+            + ")"
+        )
+        matched_rows = None
+        try:
+            matched_rows = next(
+                iter(
+                    client.query(
+                        count_query,
+                        job_config=bigquery.QueryJobConfig(query_parameters=query_params),
+                    ).result()
+                )
+            )["n"]
+        except Exception:  # noqa: BLE001 — explanatory, never fatal
+            matched_rows = None
+
         base_query += " ORDER BY scan_date DESC, score DESC LIMIT @limit"
         query_params.append(bigquery.ScalarQueryParameter("limit", "INTEGER", limit))
 
@@ -127,11 +153,28 @@ def get_signal_performance(
                 r["underlying_direction_outcome"] = "WIN" if is_win else "LOSS"
             rows.append(r)
 
+        truncated = bool(matched_rows is not None and matched_rows > len(rows))
+        note = _UNDERLYING_UNIVERSE_NOTE
+        if truncated:
+            note += (
+                f" TRUNCATED: {matched_rows} rows match these filters and {len(rows)} "
+                "were returned, ordered scan_date DESC then score DESC. The OLDEST "
+                "scan_date in this response is therefore a highest-score-only slice, "
+                "not that whole date. Do NOT compute a statistic over these rows: "
+                "narrow scan_date or raise limit until truncated is false."
+            )
+        elif matched_rows is None:
+            note += (
+                " Could not determine whether this response is complete (the row "
+                "count failed). Treat it as possibly truncated."
+            )
         return {
             "universe": "underlying_direction",
             "basis": "UNDERLYING-STOCK DIRECTION — NOT option PnL",
-            "note": _UNDERLYING_UNIVERSE_NOTE,
+            "note": note,
             "row_count": len(rows),
+            "matched_rows": matched_rows,
+            "truncated": truncated,
             "rows": rows,
         }
 
