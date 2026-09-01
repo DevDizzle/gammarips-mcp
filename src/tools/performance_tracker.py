@@ -115,11 +115,7 @@ def get_signal_performance(
         # a truncated response ends mid-scan_date on SCORE: its oldest date is a
         # highest-score-only slice, and any statistic over it is biased upward.
         # Same defect class as the 200-row query_outcomes truncation.
-        count_query = (
-            "SELECT COUNT(*) AS n FROM ("
-            + base_query
-            + ")"
-        )
+        count_query = "SELECT COUNT(*) AS n FROM (" + base_query + ")"
         matched_rows = None
         try:
             matched_rows = next(
