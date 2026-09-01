@@ -13,6 +13,7 @@ import time
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -59,7 +60,7 @@ logger = logging.getLogger(__name__)
 # 4.3.0 (2026-08-28): connect-time `instructions` in the initialize result
 # (/mcp + /jsonrpc): free/pro tiers + signup steps. Playbooks cite V4 tool
 # names; start-here gains a "How access works" section. No tool or data change.
-SERVER_VERSION = "4.3.0"
+SERVER_VERSION = "4.4.0"
 
 # Connect-time guidance, served in the initialize result. This is the
 # proactive half of the funnel; the denial envelope in utils.auth is the
@@ -130,8 +131,45 @@ _ALL_TOOLS = {
     "get_daily_report": get_daily_report,
 }
 
-for _fn in _ALL_TOOLS.values():
-    mcp.tool()(_fn)
+# Display titles + MCP tool annotations. The claude.ai Connectors Directory
+# requires both on every tool, and a human-readable `title` is what a client
+# shows instead of the snake_case function name.
+#
+# This dict is the ONE source of truth: the FastMCP registration below and
+# `get_tools_list()` (the stateless JSON-RPC path + server card) both read it,
+# so the hosted MCP surface and the card can no longer disagree. Before
+# 2026-09-01 only the card carried annotations and the real `tools/list`
+# carried none.
+#
+# All nine tools are read-only queries over a fixed set of backends, so:
+# readOnly=True, destructive=False, idempotent=True, openWorld=False.
+# `web_search` is the only open-world tool and it is not registered here.
+_TOOL_TITLES = {
+    "get_pool": "Candidate Pool",
+    "get_signal": "Signal Detail",
+    "get_liquidity": "Contract Liquidity",
+    "query_outcomes": "Realized Outcomes",
+    "replay_contract": "Contract Price Replay",
+    "get_regime_context": "Market Regime Context",
+    "get_market_calendar_status": "Market Calendar Status",
+    "get_playbook": "Methodology Playbook",
+    "get_daily_report": "Daily Report",
+}
+
+
+def _tool_annotations(name: str) -> ToolAnnotations:
+    """Annotations for a registered tool. See _TOOL_TITLES for the rationale."""
+    return ToolAnnotations(
+        title=_TOOL_TITLES[name],
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+
+
+for _name, _fn in _ALL_TOOLS.items():
+    mcp.tool(title=_TOOL_TITLES[_name], annotations=_tool_annotations(_name))(_fn)
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +251,13 @@ def get_tools_list():
         tools.append(
             {
                 "name": t.name,
+                "title": _TOOL_TITLES.get(t.name) or t.name,
                 "description": t.description,
                 "inputSchema": t.parameters,
                 "tier": "anon" if t.name in anon else "pro",
-                "annotations": {
+                "annotations": _tool_annotations(t.name).model_dump(exclude_none=True)
+                if t.name in _TOOL_TITLES
+                else {
                     "readOnlyHint": True,
                     "destructiveHint": False,
                     "idempotentHint": t.name != "web_search",

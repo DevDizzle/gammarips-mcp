@@ -188,12 +188,15 @@ def get_enriched_signals(
     news, technicals, catalyst context, a delta-targeted recommended contract,
     and (since 2026-06) the 60-day momentum feature `mom_60`.
 
-    Enrichment gate: `overnight_score >= 1` AND directional UOA > $500K, then
-    edge-ranked to the top ~50 BULLISH names. The score floor is cosmetic:
-    the UOA bar, the BULLISH gate, and the top-50 cap do the filtering.
-    This is the pool the engine's
-    own selection works from; your agent should treat it as the daily
-    candidate set and reason to its OWN contract (see
+    Selection, for scan_date >= 2026-08-24 (liquid-universe era): the 100 most
+    liquid optionable names, BULLISH only, one call each, edge-ranked and
+    capped at 50. **Liquidity decides membership, not unusual activity** — the
+    $500K UOA floor is retired and `overnight_score >= 1` is a cosmetic floor.
+    The cap binds on most sessions, so a full pool is 50 rows and a thin day is
+    fewer. Earlier scan dates come from the prior UOA-gated funnel
+    (UOA > $500K, top-50 BULLISH); the two eras are NOT one population.
+    This is the pool the engine's own selection works from; your agent should
+    treat it as the daily candidate set and reason to its OWN contract (see
     get_playbook("run-your-own-tournament")).
 
     Response size: by default (`summary=True`) rows carry ~21 decision-relevant
