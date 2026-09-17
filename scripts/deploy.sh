@@ -64,7 +64,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --timeout=300 \
     --max-instances=10 \
     --set-env-vars="REQUIRE_API_KEY=true,AUTH_SHADOW=true,OAUTH_ENABLED=true" \
-    --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GOOGLE_CSE_ID=GOOGLE_CSE_ID:latest,FMP_API_KEY=FMP_API_KEY:latest"
+    --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,FMP_API_KEY=FMP_API_KEY:latest"
 
 echo ""
 echo "========================================="
