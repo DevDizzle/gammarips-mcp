@@ -1,6 +1,7 @@
 # GammaRips MCP Server
 
 [![smithery badge](https://smithery.ai/badge/gammarips/Options-Intelligence)](https://smithery.ai/servers/gammarips/Options-Intelligence)
+[![MCP Queen grade](https://mcpqueen.com/badge/io.github.DevDizzle/gammarips.svg)](https://mcpqueen.com/s/io.github.DevDizzle/gammarips)
 
 Options-flow intelligence **primitives** for AI agents.
 
