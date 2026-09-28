@@ -256,3 +256,48 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         return await call_next(request)
+
+
+class NoGetStreamMiddleware:
+    """Answer GET on the Streamable HTTP endpoint with 405: no server push stream.
+
+    The MCP spec lets a server answer the client's optional GET with 405 when it
+    offers no server-initiated SSE stream. None of the 9 tools pushes anything,
+    so that stream never carried data. Bots and generic clients still held it
+    open until the 300 s Cloud Run timeout, and request-based billing charged
+    the instance for every second of it (2026-09-25..28: 924 GETs held
+    264,897 s; every POST together held ~500 s). The official SDK clients read
+    405 here as "no stream" and carry on over POST.
+
+    Pure ASGI, not BaseHTTPMiddleware, so nothing is buffered. The /pro gateway
+    rewrites to /mcp before this runs, so /pro is covered too. Rollback without
+    a code change: set MCP_GET_STREAM_ENABLED=true.
+    """
+
+    def __init__(self, app, path: str = "/mcp"):
+        self.app = app
+        self.path = path
+        self.stream_enabled = os.getenv("MCP_GET_STREAM_ENABLED", "false").strip().lower() == "true"
+
+    async def __call__(self, scope, receive, send):
+        if (
+            not self.stream_enabled
+            and scope["type"] == "http"
+            and scope["method"] == "GET"
+            and scope["path"].rstrip("/") == self.path
+        ):
+            response = JSONResponse(
+                status_code=405,
+                headers={"Allow": "POST, DELETE"},
+                content={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32000,
+                        "message": "Method Not Allowed: this server offers no GET stream. Use POST.",
+                    },
+                },
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)

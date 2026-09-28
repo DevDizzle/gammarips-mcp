@@ -40,7 +40,7 @@ from utils.oauth import (
 from utils.oauth import (
     issuer as oauth_issuer,
 )
-from utils.safety import RateLimitMiddleware, redact
+from utils.safety import NoGetStreamMiddleware, RateLimitMiddleware, redact
 
 # Load environment variables
 load_dotenv()
@@ -534,7 +534,11 @@ try:
         app = mcp
 
     # Add middleware. Execution order is outer->inner: CORS, RateLimit,
-    # AccessGate, RequestLogger (add order is LIFO — last added is outermost).
+    # ProEndpoint, AccessGate, RequestLogger, NoGetStream (add order is LIFO —
+    # last added is outermost).
+    # GET /mcp -> 405 (no server push stream; see NoGetStreamMiddleware).
+    # Innermost, so RequestLogger still records every refused GET.
+    app.add_middleware(NoGetStreamMiddleware)
     app.add_middleware(RequestLogger)
 
     # Phase 2 auth + tiering. Runs INSIDE the rate limiter so a bogus-key flood
