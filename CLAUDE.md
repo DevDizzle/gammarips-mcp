@@ -28,7 +28,7 @@ no "what should I buy" endpoint. Start with `README.md` for the full tool list.
 ```bash
 # From anywhere. Use the ABSOLUTE path: the permission allowlist matches on it,
 # and `bash scripts/deploy.sh` from inside the repo is denied.
-bash /home/user/workspace/projects/gammarips-mcp/scripts/deploy.sh
+bash /home/evan/workspace/projects/gammarips-mcp/scripts/deploy.sh
 ```
 
 Cloud Run **source deploy** (`gcloud run deploy --source=.`), ~4 min. Facts worth
