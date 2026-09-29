@@ -36,7 +36,15 @@ are simply hasn't-run-yet", and the 2026-09-01 open_past_due fix in this repo).
     server never reads the raw table). latest_date = MAX(scan_date). rows =
     COUNT(*) WHERE scan_date = expected. Due from 06:00 ET on the first
     weekday after expected_scan_date (the enrichment cron is 05:30 ET Mon-Fri
-    and finishes by ~05:33; it runs on NYSE holidays too). ok = rows > 0.
+    and finishes by ~05:33; it runs on NYSE holidays too). ok = rows > 0, or
+    expected_rows == 0 (nothing to enrich is not a failure).
+    expected_rows = the rows enrichment must produce for expected_scan_date,
+    from the raw scan with enrichment-trigger's own candidate filter (the
+    ENRICH_* constants below): BULLISH, overnight_score >= 1, spread NULL or
+    <= 0.30, liquidity_rank <= 100, capped at ENRICH_TOP_N = 50. It matched
+    the enriched row count exactly on all 24 scan dates 2026-08-25..09-28.
+    rows < expected_rows means the enrichment wrote a partial pool. This view
+    reports both numbers and does not judge the gap; ok stays "it ran".
   * liquidity — `pool_liquidity_snapshot`. The digest dates this table by
     DATE(as_of), the session morning, not the scan date. The writer ALSO
     stamps every row with the scan_date of the pool it re-read, and that is
@@ -99,6 +107,18 @@ SCAN_DUE_ET = dtime(23, 30)
 ENRICHMENT_DUE_ET = dtime(6, 0)
 LIQUIDITY_DUE_ET = dtime(9, 40)
 
+# enrichment-trigger's candidate filter, for stages.enrichment.expected_rows.
+# MIRRORS the engine (enrichment-trigger/main.py get_signal_tickers +
+# _edge_select_top_n; live env on rev enrichment-trigger-00050-q54, checked
+# 2026-09-29: MIN_ENRICHMENT_SCORE=1, ENRICH_LIQUID_ONLY=true, LIQUID_TOP_N=100,
+# ENRICH_TOP_N and BULLISH_ONLY at code defaults 50 / true, UOA floor 0 under
+# the liquid universe). If the engine changes one, change it here: a drifted
+# value makes a complete pool look partial, and the trader stands down.
+ENRICH_TOP_N = 50
+ENRICH_MIN_SCORE = 1
+ENRICH_MAX_SPREAD = 0.30
+ENRICH_LIQUID_TOP_N = 100
+
 # get_pool(view="enriched", limit=60): the limit the trader passes.
 POOL_LIMIT = 60
 
@@ -152,48 +172,67 @@ def _at(d: date, t: dtime) -> datetime:
 # --------------------------------------------------------------------------
 # stage queries (each one query, so one failure marks one stage unknown)
 # --------------------------------------------------------------------------
-def _run(sql: str, expected: date) -> tuple[str | None, int]:
+def _run(sql: str, expected: date) -> Any:
+    """Run one stage query (a single row of scalar subqueries) and return it."""
     if client is None:
         raise RuntimeError("BigQuery client not initialized")
     cfg = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("d", "DATE", expected.isoformat())]
     )
     for row in client.query(sql, job_config=cfg).result(timeout=_QUERY_TIMEOUT_S):
-        latest = row.latest_date
-        return (str(latest) if latest else None), int(row.n or 0)
-    return None, 0
+        return row
+    raise RuntimeError("stage query returned no row")
 
 
-def _scan_stage(expected: date) -> tuple[str | None, int]:
-    return _run(
-        f"""-- freshness:scan
+def _base(row: Any) -> dict[str, Any]:
+    latest = row.latest_date
+    return {"latest_date": str(latest) if latest else None, "rows": int(row.n or 0)}
+
+
+def _scan_stage(expected: date) -> dict[str, Any]:
+    return _base(
+        _run(
+            f"""-- freshness:scan
         SELECT
           (SELECT MAX(scan_date) FROM {_RAW_SCAN}) AS latest_date,
           (SELECT COUNT(*) FROM {_RAW_SCAN} WHERE scan_date = @d) AS n""",
-        expected,
+            expected,
+        )
     )
 
 
-def _enrichment_stage(expected: date) -> tuple[str | None, int]:
-    return _run(
+def _enrichment_stage(expected: date) -> dict[str, Any]:
+    row = _run(
         f"""-- freshness:enrichment
         SELECT
           (SELECT MAX(scan_date) FROM {_SAFE_ENRICHED}) AS latest_date,
-          (SELECT COUNT(*) FROM {_SAFE_ENRICHED} WHERE scan_date = @d) AS n""",
+          (SELECT COUNT(*) FROM {_SAFE_ENRICHED} WHERE scan_date = @d) AS n,
+          (SELECT LEAST(COUNT(*), {ENRICH_TOP_N}) FROM {_RAW_SCAN}
+            WHERE scan_date = @d
+              AND direction = 'BULLISH'
+              AND overnight_score >= {ENRICH_MIN_SCORE}
+              AND (recommended_spread_pct IS NULL
+                   OR recommended_spread_pct <= {ENRICH_MAX_SPREAD})
+              AND liquidity_rank IS NOT NULL
+              AND liquidity_rank <= {ENRICH_LIQUID_TOP_N}
+          ) AS expected_n""",
         expected,
     )
+    return _base(row) | {"expected_rows": int(row.expected_n or 0)}
 
 
-def _liquidity_stage(expected: date) -> tuple[str | None, int]:
-    return _run(
-        f"""-- freshness:liquidity
+def _liquidity_stage(expected: date) -> dict[str, Any]:
+    return _base(
+        _run(
+            f"""-- freshness:liquidity
         SELECT
           (SELECT MAX(scan_date) FROM {_POOL_LIQ}) AS latest_date,
           (SELECT COUNT(DISTINCT contract) FROM {_POOL_LIQ}
             WHERE scan_date = @d
               AND as_of = (SELECT MAX(as_of) FROM {_POOL_LIQ} WHERE scan_date = @d)
           ) AS n""",
-        expected,
+            expected,
+        )
     )
 
 
@@ -271,25 +310,16 @@ def _check(now_et: datetime) -> dict[str, Any]:
         due = due_at[name] is not None and now_et >= due_at[name]
         result, err = _outcome(name)
         if err is not None:
-            stages[name] = {
-                "table": _bare(table),
-                "latest_date": None,
-                "rows": None,
-                "ok": None,
-                "due": due,
-                "error": err,
-            }
+            stages[name] = {"table": _bare(table), "latest_date": None, "rows": None}
+            if name == "enrichment":
+                stages[name]["expected_rows"] = None
+            stages[name] |= {"ok": None, "due": due, "error": err}
             reasons.append(f"unknown-{name}")
             continue
-        latest, n = result
-        ok = n > 0 if due else True
-        stages[name] = {
-            "table": _bare(table),
-            "latest_date": latest,
-            "rows": n,
-            "ok": ok,
-            "due": due,
-        }
+        # Nothing to enrich (no qualifying BULLISH name) is not a failure.
+        nothing_due = result.get("expected_rows") == 0
+        ok = (result["rows"] > 0 or nothing_due) if due else True
+        stages[name] = {"table": _bare(table), **result, "ok": ok, "due": due}
         if not ok:
             reasons.append(f"{name}-stale")
 

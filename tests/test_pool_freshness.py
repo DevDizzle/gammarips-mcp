@@ -49,8 +49,10 @@ class FakeBQ:
     returns; pool_rows[date] is how many rows the enriched pool query returns.
     """
 
-    def __init__(self, counts, pool_max, pool_rows, fail=(), sleep=None):
+    def __init__(self, counts, pool_max, pool_rows, fail=(), sleep=None, expected=None):
         self.counts = counts
+        # expected[date] = enrichment's expected_rows; default from the scan.
+        self.expected = expected or {}
         self.pool_max = pool_max
         self.pool_rows = pool_rows
         self.fail = set(fail)
@@ -98,7 +100,13 @@ class _Job:
             ]
         by_date = bq.counts.get(stage, {})
         latest = max((d for d, n in by_date.items() if n > 0), default=None)
-        return [Row(latest_date=latest, n=by_date.get(self.params["d"], 0))]
+        d = self.params["d"]
+        row = Row(latest_date=latest, n=by_date.get(d, 0))
+        if stage == "enrichment":
+            # Default: every scanned name qualifies, capped at 50, as on a
+            # normal day. A missing scan gives 0.
+            row["expected_n"] = bq.expected.get(d, min(50, bq.counts.get("scan", {}).get(d, 0)))
+        return [row]
 
 
 @pytest.fixture
@@ -150,6 +158,7 @@ def test_all_stages_current_is_fresh(install):
         assert s["latest_date"] == "2026-09-28"
         assert s["ok"] is True and s["due"] is True
     assert r["stages"]["scan"]["rows"] == 100
+    assert r["stages"]["enrichment"]["expected_rows"] == 50
     assert r["pool_scan_date"] == "2026-09-28"
     assert r["pool_rows"] == 50
     assert r["fresh"] is True
@@ -411,3 +420,69 @@ def test_freshness_view_dispatches(install, monkeypatch):
     r = v4.get_market_calendar_status(view="freshness")
     assert r["schema"] == "pool-freshness/1"
     monkeypatch.setattr(freshness, "_cache", None)
+
+
+# ---------------------------------------------------------- expected_rows --
+def test_partial_enrichment_is_reported_not_judged(install):
+    # 40 of 50 expected rows landed. The view reports both numbers; the
+    # completeness test belongs to the consumer.
+    bq = healthy()
+    bq.counts["enrichment"]["2026-09-28"] = 40
+    bq.expected = {"2026-09-28": 50}
+    install(bq)
+    r = freshness.get_pool_freshness(now_et=TUE)
+    enr = r["stages"]["enrichment"]
+    assert enr["rows"] == 40 and enr["expected_rows"] == 50
+    assert enr["ok"] is True
+
+
+def test_nothing_to_enrich_is_not_enrichment_stale(install):
+    # The scan ran but no name qualified (no BULLISH name on a hard selloff).
+    # Enrichment had nothing to write, so it is not overdue. get_pool still
+    # serves the prior pool, so the day is not fresh.
+    bq = healthy()
+    bq.counts["enrichment"].pop("2026-09-28")
+    bq.counts["liquidity"].pop("2026-09-28")
+    bq.expected = {"2026-09-28": 0}
+    bq.pool_max = "2026-09-25"
+    install(bq)
+    r = freshness.get_pool_freshness(now_et=TUE)
+    enr = r["stages"]["enrichment"]
+    assert enr["rows"] == 0 and enr["expected_rows"] == 0 and enr["ok"] is True
+    assert "enrichment-stale" not in r["reasons"]
+    assert "pool-stale" in r["reasons"]
+    assert r["fresh"] is False
+
+
+def test_enrichment_error_nulls_expected_rows(install):
+    bq = healthy()
+    bq.fail = {"enrichment"}
+    install(bq)
+    enr = freshness.get_pool_freshness(now_et=TUE)["stages"]["enrichment"]
+    assert enr["expected_rows"] is None and enr["ok"] is None
+
+
+def test_expected_rows_sql_mirrors_the_enrichment_filter():
+    # The live query is BigQuery; pin the filter text so a drift is a diff.
+    captured = {}
+
+    class _Capture:
+        def query(self, sql, job_config=None):
+            captured["sql"] = sql
+            return _Job(healthy(), "enrichment", {"d": "2026-09-28"})
+
+    orig = freshness.client
+    freshness.client = _Capture()
+    try:
+        freshness._enrichment_stage(datetime(2026, 9, 28).date())
+    finally:
+        freshness.client = orig
+    sql = " ".join(captured["sql"].split())
+    for part in (
+        "LEAST(COUNT(*), 50)",
+        "direction = 'BULLISH'",
+        "overnight_score >= 1",
+        "recommended_spread_pct <= 0.3",
+        "liquidity_rank <= 100",
+    ):
+        assert part in sql, part

@@ -514,7 +514,9 @@ def get_market_calendar_status(view: str = "status") -> Any:
         Returns schema "pool-freshness/1": expected_scan_date (the last NYSE
         session before today), each pipeline stage (scan, enrichment,
         liquidity) with its latest date, row count for the expected date,
-        and ok (true / false = overdue / null = could not check), the
+        and ok (true / false = overdue / null = could not check); the
+        enrichment stage also gives expected_rows (the rows the enrichment
+        filter must produce, so rows < expected_rows is a partial pool); the
         scan_date get_pool(view="enriched") serves by default
         (pool_scan_date) and its row count (pool_rows), `fresh`, and machine
         `reasons` (scan-stale, enrichment-stale, liquidity-stale, pool-stale,

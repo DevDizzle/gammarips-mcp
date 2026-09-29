@@ -5,6 +5,7 @@ Dated record of changes that affect how you should interpret the data. Re-check 
 ## 2026-09-29 — Pool freshness check: `get_market_calendar_status(view="freshness")`
 - New free view. It answers one question: is the pool you are about to act on the right pool? It returns `expected_scan_date` (the last NYSE session before today), the status of each pipeline stage that feeds the pool (scanner, enrichment, liquidity snapshot), the scan date `get_pool(view="enriched")` serves by default (`pool_scan_date`) with its row count (`pool_rows`), a `fresh` flag, and machine `reasons` (for example `pool-stale`, `enrichment-stale`, `unknown-scan`).
 - It fails closed. A check that could not run is `unknown-<stage>` and never fresh. A stage that is not yet due is not a failure. Before the 06:00 ET enrichment, `fresh` is false with reason `pool-stale`, because the next pool does not exist yet.
+- The enrichment stage also gives `expected_rows`: the number of rows the enrichment filter must produce for that scan (BULLISH, score of 1 or more, in the top 100 liquid names, capped at 50). If `rows` is less than `expected_rows`, the pool is partial. This test does not change with market direction, unlike a fixed row floor.
 - It sets no row floor. Apply your own to `pool_rows`. The contract is versioned by its `schema` field (`pool-freshness/1`).
 
 ## 2026-08-28 — Server 4.3.0: connect-time guidance; playbooks cite V4 names
