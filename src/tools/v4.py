@@ -18,7 +18,7 @@ against them):
   query_outcomes           pro    outcomes/receipts substrate (view= modes)
   replay_contract          pro    price tape: minute path | daily marks
   get_regime_context       free   VIX/VIX3M regime rail (unchanged)
-  get_market_calendar_status free NYSE status | available scan dates
+  get_market_calendar_status free NYSE status | available scan dates | pool freshness
   get_playbook             free   methodology | field dict | data-contract schema
   get_daily_report         free   full report | recent-report list
 
@@ -35,6 +35,7 @@ from tools.contract_history import replay_contract as _replay_contract_impl
 from tools.earnings import get_earnings_window as _get_earnings_window_impl
 from tools.education import get_market_calendar_status as _get_market_calendar_status_impl
 from tools.education import get_signal_explainer as _get_signal_explainer_impl
+from tools.freshness import get_pool_freshness as _get_pool_freshness_impl
 from tools.historical import get_historical_performance as _get_historical_performance_impl
 from tools.market_snapshot import get_contract_snapshot as _get_contract_snapshot_impl
 from tools.market_snapshot import get_pool_liquidity as _get_pool_liquidity_impl
@@ -498,27 +499,42 @@ def replay_contract(
 
 
 # ===========================================================================
-# 7. get_market_calendar_status  (free)  — NYSE status OR available scan dates
+# 7. get_market_calendar_status  (free)  — NYSE status, scan dates, pool freshness
 # ===========================================================================
 def get_market_calendar_status(view: str = "status") -> Any:
     """
-    Market-calendar reference. Two `view`s:
+    Market-calendar reference. Three `view`s:
 
       * view="status" (DEFAULT) — is the US equity market open today, plus the
         next open/close, holiday, and early-close flags (NYSE calendar,
         deterministic — no "is the market open?" hallucination).
       * view="scan_dates" — which recent scan dates have GammaRips data, with
-        per-date signal counts (the pool's data-availability calendar).
+        per-date signal counts (the raw scan's data-availability calendar).
+      * view="freshness" — is the pool you are about to trade the right pool?
+        Returns schema "pool-freshness/1": expected_scan_date (the last NYSE
+        session before today), each pipeline stage (scan, enrichment,
+        liquidity) with its latest date, row count for the expected date,
+        and ok (true / false = overdue / null = could not check), the
+        scan_date get_pool(view="enriched") serves by default
+        (pool_scan_date) and its row count (pool_rows), `fresh`, and machine
+        `reasons` (scan-stale, enrichment-stale, liquidity-stale, pool-stale,
+        pool-empty, unknown-<stage|pool>). Fail-closed: an unknown is never
+        fresh. A stage not yet due reports ok=true, due=false; before the
+        06:00 ET enrichment, fresh is false with reason pool-stale because
+        the next pool does not exist yet. No row floor is applied; apply
+        your own to pool_rows. Cached up to 60 s.
 
     Args:
-        view: "status" (default) | "scan_dates".
+        view: "status" (default) | "scan_dates" | "freshness".
     """
     v = (view or "status").strip().lower()
     if v == "status":
         return _get_market_calendar_status_impl()
     if v == "scan_dates":
         return _get_available_dates_impl()
-    return _bad("view", view, ["status", "scan_dates"])
+    if v == "freshness":
+        return _get_pool_freshness_impl()
+    return _bad("view", view, ["status", "scan_dates", "freshness"])
 
 
 # ===========================================================================

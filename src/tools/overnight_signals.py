@@ -174,6 +174,19 @@ def get_overnight_signals(
         return [{"error": safe_error(e, "get_overnight_signals")}]
 
 
+def latest_enriched_scan_date() -> str | None:
+    """The scan_date get_enriched_signals serves when the caller passes none.
+
+    ONE definition. The freshness view (tools/freshness.py) reports this exact
+    value as `pool_scan_date`, so the trader's staleness check and the pool it
+    trades can never disagree. Raises on a query failure; callers own that.
+    """
+    query = f"SELECT MAX(scan_date) as max_date FROM {_SAFE_ENRICHED}"
+    for row in client.query(query).result():
+        return str(row.max_date) if row.max_date else None
+    return None
+
+
 def get_enriched_signals(
     scan_date: str | None = None,
     direction: str | None = None,
@@ -230,12 +243,7 @@ def get_enriched_signals(
     try:
         # Determine scan_date if not provided
         if not scan_date:
-            query = f"SELECT MAX(scan_date) as max_date FROM {_SAFE_ENRICHED}"
-            query_job = client.query(query)
-            results = query_job.result()
-            for row in results:
-                scan_date = str(row.max_date) if row.max_date else None
-                break
+            scan_date = latest_enriched_scan_date()
 
         if not scan_date:
             return [{"error": "No data found in the enriched signals view"}]

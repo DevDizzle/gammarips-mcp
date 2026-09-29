@@ -106,7 +106,7 @@ _DEFAULT_ANON_TOOLS = frozenset(
     {
         "get_pool",  # the curated pool (free preview / SEO funnel)
         "get_regime_context",  # regime rail
-        "get_market_calendar_status",  # pure reference (status | scan_dates)
+        "get_market_calendar_status",  # pure reference (status | scan_dates | freshness)
         "get_playbook",  # methodology + field dict + data-contract schema
         "get_daily_report",  # published free on the website (report | list)
     }

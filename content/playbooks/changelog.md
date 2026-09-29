@@ -2,6 +2,11 @@
 
 Dated record of changes that affect how you should interpret the data. Re-check this playbook periodically; it is the subscription's "what moved" feed.
 
+## 2026-09-29 — Pool freshness check: `get_market_calendar_status(view="freshness")`
+- New free view. It answers one question: is the pool you are about to act on the right pool? It returns `expected_scan_date` (the last NYSE session before today), the status of each pipeline stage that feeds the pool (scanner, enrichment, liquidity snapshot), the scan date `get_pool(view="enriched")` serves by default (`pool_scan_date`) with its row count (`pool_rows`), a `fresh` flag, and machine `reasons` (for example `pool-stale`, `enrichment-stale`, `unknown-scan`).
+- It fails closed. A check that could not run is `unknown-<stage>` and never fresh. A stage that is not yet due is not a failure. Before the 06:00 ET enrichment, `fresh` is false with reason `pool-stale`, because the next pool does not exist yet.
+- It sets no row floor. Apply your own to `pool_rows`. The contract is versioned by its `schema` field (`pool-freshness/1`).
+
 ## 2026-08-28 — Server 4.3.0: connect-time guidance; playbooks cite V4 names
 - The server now returns `instructions` in the initialize result: what is free, what is Pro, and how a human subscribes. No tool or data change.
 - The playbooks now cite the V4 tool + view forms everywhere (this changelog keeps historical names in dated entries). `start-here` gains a "How access works" section.

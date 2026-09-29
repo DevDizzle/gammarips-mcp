@@ -48,7 +48,10 @@ https://gammarips.com/pricing). If a pro tool or view returns
    `get_playbook("daily-workflow")`, and `get_playbook("methodology")` for the
    selection logic. Check `get_market_calendar_status` (and
    `get_market_calendar_status(view="scan_dates")` for which dates have data)
-   before assuming today has a pool.
+   before assuming today has a pool. Before you act on the pool, call
+   `get_market_calendar_status(view="freshness")`. `fresh` is false when the
+   pool is stale or empty, or when a check could not run. It sets no row
+   floor, so apply your own to `pool_rows`.
 2. **Read the day.** `get_daily_report` for the editorial synthesis;
    `get_pool(view="enriched")` (pro) for the curated pool with narratives,
    technicals, catalysts, and the recommended contract per name.

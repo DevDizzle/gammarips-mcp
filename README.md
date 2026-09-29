@@ -71,7 +71,10 @@ live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
 - `get_regime_context` **(free)** — VIX/VIX3M/SPY-trend as-of scan date + the
   fail-closed regime rail.
 - `get_market_calendar_status` **(free)** — `view="status"` (NYSE open/close,
-  default) or `view="scan_dates"` (which scan dates have data).
+  default), `view="scan_dates"` (which scan dates have data), or
+  `view="freshness"` (is the pool the right pool: the expected scan date,
+  each pipeline stage's status, the scan date `get_pool` serves, and a
+  fail-closed `fresh` flag with machine `reasons`).
 - `get_playbook` **(free)** — methodology + reference: no arg lists the
   catalog; `name=` fetches a playbook (`start-here`, `daily-workflow`,
   `run-your-own-tournament`, `exit-lab`, `leakage-and-data-contract`,

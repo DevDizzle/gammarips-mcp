@@ -124,7 +124,7 @@ _ALL_TOOLS = {
     "replay_contract": replay_contract,
     # regime rail (unchanged)
     "get_regime_context": get_regime_context,
-    # market calendar (status | scan_dates)
+    # market calendar (status | scan_dates | freshness)
     "get_market_calendar_status": get_market_calendar_status,
     # methodology + field dict + data-contract schema
     "get_playbook": get_playbook,
