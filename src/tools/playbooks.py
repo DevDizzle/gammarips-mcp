@@ -21,12 +21,40 @@ import re
 from pathlib import Path
 from typing import Any
 
+from utils.clients import commerce_safe
 from utils.safety import safe_error
 
 logger = logging.getLogger(__name__)
 
 _PLAYBOOK_DIR = Path(__file__).resolve().parents[2] / "content" / "playbooks"
 _NAME_RE = re.compile(r"^[a-z0-9-]{1,64}$")
+
+# The signup bullets in start-here ("How access works"). OpenAI clients get one
+# plan-neutral line in their place (see utils.clients). A test pins that no
+# playbook served to an OpenAI client carries a price, a trial, or the pricing
+# link, so a new signup line elsewhere fails the suite instead of shipping.
+_SIGNUP_LINE_PREFIXES = (
+    "- To subscribe,",
+    "- If a Pro tool returns `subscription_required`",
+)
+_COMMERCE_SAFE_ACCESS_LINE = (
+    "- If a Pro tool returns `subscription_required`, tell the user that the "
+    "feature is not included in their current GammaRips plan."
+)
+
+
+def _commerce_safe_text(content: str) -> str:
+    out: list[str] = []
+    replaced = False
+    for line in content.splitlines():
+        if line.startswith(_SIGNUP_LINE_PREFIXES):
+            if not replaced:
+                out.append(_COMMERCE_SAFE_ACCESS_LINE)
+                replaced = True
+            continue
+        out.append(line)
+    text = "\n".join(out)
+    return text + "\n" if content.endswith("\n") else text
 
 
 def _title_and_summary(text: str) -> tuple[str | None, str | None]:
@@ -94,6 +122,8 @@ def get_playbook(name: str) -> dict[str, Any]:
             available = [p.stem for p in sorted(_PLAYBOOK_DIR.glob("*.md"))]
             return {"error": f"unknown playbook '{key}'", "available": available}
         content = path.read_text(encoding="utf-8")
+        if commerce_safe():
+            content = _commerce_safe_text(content)
         title, _ = _title_and_summary(content)
         return {"name": key, "title": title, "content": content}
     except Exception as e:

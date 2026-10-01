@@ -18,7 +18,7 @@ from mcp.types import ToolAnnotations
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from utils.auth import (
     PRICE,
@@ -30,6 +30,7 @@ from utils.auth import (
     resolve_identity,
     tool_allowed,
 )
+from utils.clients import ClientContextMiddleware, commerce_safe, is_openai_client
 from utils.oauth import (
     PRO_PATH,
     ProEndpointMiddleware,
@@ -86,6 +87,26 @@ _INSTRUCTIONS = (
     "research. Educational only. Not investment advice."
 )
 
+# The same guidance for OpenAI clients (ChatGPT, Codex): no price, no trial,
+# no subscribe steps. Their plugin rules forbid them (see utils.clients).
+_INSTRUCTIONS_COMMERCE_SAFE = (
+    "GammaRips serves read-only options-flow data primitives. It never "
+    "returns a pick. Your agent reasons to its own contract and exit. "
+    "First call get_playbook(name='start-here'). "
+    "Every GammaRips plan includes get_pool(view='preview'), "
+    "get_daily_report, get_playbook, get_regime_context, and "
+    "get_market_calendar_status. The full pool (enriched / raw / features "
+    "views), get_signal, get_liquidity, query_outcomes, and replay_contract "
+    "need GammaRips Pro. If a tool returns subscription_required, tell the "
+    "user that the feature is not included in their current plan. All data "
+    "is paper-traded research. Educational only. Not investment advice."
+)
+
+
+def _instructions_for(openai_client: bool) -> str:
+    return _INSTRUCTIONS_COMMERCE_SAFE if openai_client else _INSTRUCTIONS
+
+
 # Initialize FastMCP server
 mcp = FastMCP(
     name="gammarips",
@@ -93,6 +114,23 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=int(os.getenv("PORT", "8080")),
 )
+
+# FastMCP builds the initialize result from one static `instructions` string.
+# Wrap the low-level server's options factory so a session opened by an OpenAI
+# client gets the commerce-safe text. Both the Streamable HTTP and the SSE
+# transports call this factory when a session starts, inside the context of
+# the request that opened it (utils.clients.ClientContextMiddleware).
+_base_initialization_options = mcp._mcp_server.create_initialization_options
+
+
+def _client_aware_initialization_options(*args, **kwargs):
+    options = _base_initialization_options(*args, **kwargs)
+    if commerce_safe():
+        options = options.model_copy(update={"instructions": _INSTRUCTIONS_COMMERCE_SAFE})
+    return options
+
+
+mcp._mcp_server.create_initialization_options = _client_aware_initialization_options
 
 # Import the 9 V4 consolidated tools. Each is a thin arg-driven dispatcher over
 # the V3 query logic (see tools/v4.py); the leakage-safe implementations are
@@ -292,6 +330,14 @@ async def execute_tool(tool_name: str, args: dict, user_info: dict = None) -> st
         raise e
 
 
+async def openai_apps_challenge(request: Request):
+    """OpenAI plugin-directory domain verification: the bare token, or 404."""
+    token = os.getenv("OPENAI_APPS_CHALLENGE", "").strip()
+    if not token:
+        return PlainTextResponse("not found", status_code=404)
+    return PlainTextResponse(token)
+
+
 async def server_card(request: Request):
     """
     Server discovery card for Smithery and other MCP registries.
@@ -415,7 +461,7 @@ async def handle_jsonrpc(request: Request):
                     "protocolVersion": "2025-06-18",
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "gammarips-mcp", "version": SERVER_VERSION},
-                    "instructions": _INSTRUCTIONS,
+                    "instructions": _instructions_for(is_openai_client(request.headers)),
                 },
             }
         )
@@ -447,7 +493,9 @@ async def handle_jsonrpc(request: Request):
                     content={
                         "jsonrpc": "2.0",
                         "id": request_id,
-                        "error": denied_error(tool_name),
+                        "error": denied_error(
+                            tool_name, commerce_safe=is_openai_client(request.headers)
+                        ),
                     }
                 )
 
@@ -571,6 +619,10 @@ try:
         allow_headers=["*"],
     )
 
+    # OUTERMOST (added last): flags OpenAI-client requests for the
+    # commerce-safe instructions + playbook text (utils.clients).
+    app.add_middleware(ClientContextMiddleware)
+
     # Fix HTTP 421 errors by Monkey Patching TrustedHostMiddleware to bypass all checks
     try:
         from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -610,6 +662,11 @@ try:
     app.add_route(
         "/.well-known/oauth-authorization-server", authorization_server_metadata, methods=["GET"]
     )
+
+    # OpenAI plugin-directory domain verification. The portal issues a token
+    # and checks that this URL returns exactly that token as plain text. 404
+    # until OPENAI_APPS_CHALLENGE is set. The token is public by design.
+    app.add_route("/.well-known/openai-apps-challenge", openai_apps_challenge, methods=["GET"])
     logger.info(
         f"OAuth resource server: enabled={oauth_enabled()} issuer={oauth_issuer()} pro={PRO_PATH}"
     )

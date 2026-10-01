@@ -39,6 +39,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from utils.clients import PLANS_URL_COMMERCE_SAFE, is_openai_client
 from utils.oauth import (
     SCOPE_ENDPOINT_KEY,
     SCOPE_IDENTITY_KEY,
@@ -367,7 +368,35 @@ def meter(identity: Identity, tool: str, decision: str, mode: str, endpoint: str
 # --- denial envelope -------------------------------------------------------
 
 
-def denied_error(tool: str) -> dict:
+def _denied_error_commerce_safe(tool: str) -> dict:
+    """The denial for OpenAI clients (ChatGPT, Codex). Their plugin rules allow
+    "this feature is not in your current plan" plus a link to an informational
+    plans page, and forbid prices, trial offers, and subscribe steps. See
+    utils.clients. Same code and error number as the full envelope."""
+    hint = (
+        "get_pool(view='preview') works on every GammaRips plan; the full "
+        "enriched / raw / features pool does not. "
+        if tool == "get_pool"
+        else ""
+    )
+    return {
+        "code": -32001,
+        "message": (
+            hint + f"'{tool}' is not included in the user's current GammaRips "
+            f"plan. It needs GammaRips Pro. Plan details: {PLANS_URL_COMMERCE_SAFE} . "
+            "If the user already has Pro, they disconnect and reconnect GammaRips "
+            "in ChatGPT so the new plan applies. Data and tools, not advice."
+        ),
+        "data": {
+            "code": "subscription_required",
+            "tool": tool,
+            "required_tier": "pro",
+            "plans_url": PLANS_URL_COMMERCE_SAFE,
+        },
+    }
+
+
+def denied_error(tool: str, commerce_safe: bool = False) -> dict:
     """JSON-RPC error object for a tool a caller isn't entitled to.
 
     This envelope is the entire sales pitch for a paywall bounce: the caller is
@@ -375,7 +404,11 @@ def denied_error(tool: str) -> dict:
     price, the trial, what Pro unlocks, and the exact next steps, in both prose
     (message) and machine-legible form (data). Data-not-advice framing applies
     here like everywhere else.
+
+    commerce_safe=True (OpenAI clients) returns the plan-neutral variant.
     """
+    if commerce_safe:
+        return _denied_error_commerce_safe(tool)
     # get_pool IS free at view="preview"; only the full pool is pro. Say so, so
     # a funnel agent knows the free entry point instead of just bouncing off.
     hint = (
@@ -494,9 +527,10 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
 
         if denied_tool is not None and mode == MODE_ENFORCE:
             # Single call: echo its id. Batch: id of the first denied element.
+            error = denied_error(denied_tool, commerce_safe=is_openai_client(request.headers))
             return JSONResponse(
                 status_code=200,
-                content={"jsonrpc": "2.0", "id": denied_id, "error": denied_error(denied_tool)},
+                content={"jsonrpc": "2.0", "id": denied_id, "error": error},
             )
 
         return await call_next(request)
