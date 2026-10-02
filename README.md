@@ -1,6 +1,6 @@
 # GammaRips MCP Server
 
-[![smithery badge](https://smithery.ai/badge/gammarips/Options-Intelligence)](https://smithery.ai/servers/gammarips/Options-Intelligence)
+[![LightNow capabilities](https://lightnow.ai/badge/io.github.DevDizzle/gammarips)](https://lightnow.ai/servers/io.github.DevDizzle/gammarips)
 
 Options-flow intelligence **primitives** for AI agents.
 
