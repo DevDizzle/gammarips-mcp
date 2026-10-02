@@ -1,0 +1,21 @@
+{
+  "name": "gammarips",
+  "displayName": "GammaRips",
+  "version": "1.0.0",
+  "description": "Read-only US options-flow data for Claude: the nightly liquidity-ranked pool, point-in-time features, realized opportunity surfaces, and methodology, plus skills for a morning brief and exit testing. No pick endpoint. Educational research data, not investment advice.",
+  "author": {
+    "name": "GammaRips",
+    "email": "evan@gammarips.com",
+    "url": "https://gammarips.com"
+  },
+  "homepage": "https://gammarips.com/developers",
+  "repository": "https://github.com/DevDizzle/gammarips-mcp",
+  "license": "MIT",
+  "keywords": ["options", "options-flow", "market-data", "trading-research", "finance"],
+  "mcpServers": {
+    "gammarips": {
+      "type": "http",
+      "url": "https://mcp.gammarips.com/pro"
+    }
+  }
+}

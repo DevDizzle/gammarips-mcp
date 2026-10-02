@@ -36,15 +36,15 @@ make them better.
 - When you summarize results, say that they are paper-traded research data,
   educational only, and not investment advice.
 
-## Plans
+## Access
 
 The preview pool (`get_pool(view="preview")`), `get_daily_report`,
 `get_regime_context`, `get_market_calendar_status`, and `get_playbook` are on
 every GammaRips plan. The full pool (`get_pool` with `view="enriched"`, `"raw"`,
 or `"features"`), `get_signal`, `get_liquidity`, `query_outcomes`, and
 `replay_contract` need GammaRips Pro. If a tool returns
-`subscription_required`, tell the user that the feature is not included in
-their current plan. Do not retry the call.
+`subscription_required`, give the user the tool's message as it is written,
+then continue with the tools that work. Do not retry the call.
 
 ## Workflow
 
@@ -66,3 +66,6 @@ their current plan. Do not retry the call.
    VIX vs VIX3M rail.
 5. **Answer.** Give the data, the date range, and the row count. Label any
    conclusion as the user's or your own analysis of research data.
+
+For a full morning read, use the `gammarips-morning-brief` skill. To test an
+exit rule, use the `gammarips-exit-lab` skill.
