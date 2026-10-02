@@ -72,6 +72,24 @@ def _bad(param: str, value: Any, allowed: list[str]) -> dict[str, Any]:
     }
 
 
+# The positions / performance views serve the paper cohort of the engine's
+# one-pick-a-day tournament, retired 2026-09-28 (gammarips-engine
+# docs/DECISIONS/2026-09-28-retire-tournament-paper-cohort-eval.md). Agents read
+# it as "GammaRips' picks" unless the response itself says otherwise, so the
+# label rides first in every response from those two views.
+RETIRED_COHORT_STATUS = (
+    "RETIRED 2026-09-28. History of one former engine test: one tournament pick "
+    "per day under one fixed exit. It is not the GammaRips product and not the "
+    "pool. Do not use it to judge the pool or to describe GammaRips results."
+)
+
+
+def _label_retired_cohort(result: Any) -> Any:
+    if isinstance(result, dict):
+        return {"cohort_status": RETIRED_COHORT_STATUS, **result}
+    return result
+
+
 # ===========================================================================
 # 1. get_pool  (free)  — the candidate pool, four views
 # ===========================================================================
@@ -282,10 +300,10 @@ def query_outcomes(
     min_premium_score: int | None = None,
 ) -> dict[str, Any]:
     """
-    The realized-outcome + receipts substrate behind the engine. One tool,
-    nine `view`s. Whole-pool composites under any FIXED exit are NEGATIVE by
-    construction — these are a research surface (how outcomes distribute
-    across features and exits), never a strategy track record.
+    The realized-outcome history behind the pool: use it to set a target and
+    a stop from what past pool contracts actually did. One tool, nine
+    `view`s. A pool-wide result under one fixed exit describes that one rule,
+    not a forecast for the plan you build.
 
       * view="labels" (DEFAULT) — row-level realized bracket LABELS joined to
         point-in-time features. horizon "same_day" (live V7.1 GIGO +40/-30) or
@@ -315,14 +333,14 @@ def query_outcomes(
         outcome.
       * view="win_rate" — aggregate UNDERLYING-direction win rate over `days`
         (NOT option PnL; headline key carries its universe).
-      * view="positions" — the RECEIPTS: realized (closed) paper trades from
-        the engine's own daily pick, row-level, cohort-filtered
-        (`policy_version`, default live). Over `days`, `limit`.
-      * view="performance" — cohort AGGREGATE of the receipts over `days`
-        (win rate, avg/median/best/worst), `direction`, `min_premium_score`,
-        `policy_version`. When the cohort has no closed trades, every aggregate
-        is `null` and `total_trades` is 0 — NEVER 0.0. A `null` here means "not
-        measured yet", not "zero percent"; do not render it as a result.
+      * view="positions" — history of a RETIRED engine test: closed paper
+        trades from the engine's former one-pick-a-day tournament under one
+        fixed exit (retired 2026-09-28). Not the product and not the pool; do
+        not use it to judge the pool. Row-level, over `days`, `limit`.
+      * view="performance" — aggregate of that retired test over `days`
+        (`direction`, `min_premium_score`, `policy_version`). Same caveat:
+        history of one retired rule, not a GammaRips result. When it has no
+        closed trades, every aggregate is `null` and `total_trades` is 0.
 
     All returns are FRACTIONS (0.40 = +40%). Realized data serves closed
     windows only. Paper-traded research data; not investment advice.
@@ -421,13 +439,17 @@ def query_outcomes(
     if v == "win_rate":
         return _get_win_rate_summary_impl(days=days)
     if v == "positions":
-        return _get_position_history_impl(days=days, limit=limit, policy_version=policy_version)
+        return _label_retired_cohort(
+            _get_position_history_impl(days=days, limit=limit, policy_version=policy_version)
+        )
     if v == "performance":
-        return _get_historical_performance_impl(
-            lookback_days=days,
-            direction=direction,
-            min_premium_score=min_premium_score,
-            policy_version=policy_version,
+        return _label_retired_cohort(
+            _get_historical_performance_impl(
+                lookback_days=days,
+                direction=direction,
+                min_premium_score=min_premium_score,
+                policy_version=policy_version,
+            )
         )
     return _bad(
         "view",

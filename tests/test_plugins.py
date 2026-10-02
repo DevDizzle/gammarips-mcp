@@ -44,7 +44,29 @@ def test_commerce_patterns_catch_prices_and_trials_only():
     assert not hits("The full pool needs GammaRips Pro.")
 
 
+def test_trade_plan_ships_to_claude_and_cursor_not_chatgpt():
+    names = {d.name for d in build_plugins.skill_dirs()}
+    assert "gammarips-trade-plan" in names
+    assert (ROOT / "plugins/claude/skills/gammarips-trade-plan/SKILL.md").is_file()
+    chatgpt = {d.name for d in build_plugins.chatgpt_skill_dirs()}
+    assert "gammarips-trade-plan" not in chatgpt
+    assert chatgpt == names - build_plugins.CHATGPT_EXCLUDED_SKILLS
+
+
+def test_retired_cohort_label_rides_first():
+    sys.path.insert(0, str(ROOT / "src"))
+    from tools import v4
+
+    labeled = v4._label_retired_cohort({"total_trades": 17})
+    assert list(labeled)[0] == "cohort_status"
+    assert labeled["cohort_status"].startswith("RETIRED 2026-09-28")
+    assert labeled["total_trades"] == 17
+    assert v4._label_retired_cohort([1, 2]) == [1, 2]
+
+
 if __name__ == "__main__":
     test_plugins_pass_check_mode()
     test_commerce_patterns_catch_prices_and_trials_only()
+    test_trade_plan_ships_to_claude_and_cursor_not_chatgpt()
+    test_retired_cohort_label_rides_first()
     print("PASS")

@@ -1,6 +1,6 @@
 ---
 name: gammarips-morning-brief
-description: Build a morning brief from GammaRips data - market calendar, pool freshness, the daily report, the VIX regime rail, and a snapshot of the nightly options-flow pool. Use when the user asks for a morning brief, a pre-market read, what is on the board today, or what GammaRips shows today. Presents data only and never picks a trade.
+description: Build a morning brief from GammaRips data - market calendar, pool freshness, the daily report, the VIX regime rail, and a snapshot of the nightly liquidity-selected options pool. Use when the user asks for a morning brief, a pre-market read, what is on the board today, or what GammaRips shows today. Ends with an offer to build a trade plan.
 ---
 
 # GammaRips morning brief
@@ -37,19 +37,19 @@ Use this order and keep it short:
 - **Pool snapshot:** up to 10 names in a table. With the enriched view, show
   ticker, contract (strike and expiration), delta, days to expiration, and a
   one-line thesis. With the preview view, show ticker, score, and headline.
-  Keep the order the tool returns, and say that the order is not a ranking of
-  trades.
+  Keep the order the tool returns. Say that the plan step chooses the
+  candidates, not the table order.
 - **Caveats:** paper-traded research data, educational only, not investment
   advice. Add any freshness reason from step 2.
-- **Next questions:** offer a deep dive on one ticker (`get_signal`), a
-  liquidity check on one contract (`get_liquidity`), or an exit test (the
-  `gammarips-exit-lab` skill).
+- **Next step:** offer to build a trade plan from this pool (the
+  `gammarips-trade-plan` skill if it is available, otherwise the plan steps in
+  `get_playbook(name="start-here")`). Also offer a deep dive on one ticker
+  (`get_signal`) or an exit test (the `gammarips-exit-lab` skill).
 
 ## Rules
 
-- Never choose a contract for the user, and never say what GammaRips would buy.
-  If the user asks "which one?", give the data for the names they ask about and
-  say that the choice is theirs.
-- Never state or suggest an expected return or a win rate.
+- If the user asks "which one?", build a trade plan with them. Label it as
+  your analysis of GammaRips data, never as a GammaRips recommendation.
+- Do not state an expected return or a win rate.
 - Do not add news or prices from outside these tools without saying where they
   came from.

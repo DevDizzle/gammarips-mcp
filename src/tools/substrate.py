@@ -52,11 +52,10 @@ _EXACT_LABEL_RULES = {
 }
 
 _COMPOSITE_DISCLAIMER = (
-    "Whole-pool composites under any FIXED exit rule are negative — the pool "
-    "surfaces opportunity (excursion potential), not a packaged return. Use "
-    "these aggregates to study how outcomes distribute across features and "
-    "exits, not as a strategy track record. Paper-traded research data. "
-    "Not investment advice."
+    "These aggregates describe every pool contract under one fixed exit rule. "
+    "They are not a forecast for a plan with its own selection and exit. Use "
+    "them to see how outcomes distribute across features and exits, and to set "
+    "a target and a stop. Paper-traded research data. Not investment advice."
 )
 
 

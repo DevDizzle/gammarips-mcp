@@ -55,10 +55,18 @@ OPENAI_LIMITS = [
 COMMERCE = [r"\$\d", r"\btrial\b", r"/pricing", r"/account", r"subscribe\b", r"upgrade"]
 SECRET = re.compile(r"gr_live_[A-Za-z0-9]{8,}")
 NAME_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?")
+# Skills held out of the ChatGPT ZIP. v1 goes to OpenAI review without the
+# trade-plan skill (specific trade plans carry more review risk there); the
+# server's start-here playbook still carries the plan steps for every client.
+CHATGPT_EXCLUDED_SKILLS = {"gammarips-trade-plan"}
 
 
 def skill_dirs() -> list[Path]:
     return sorted(p.parent for p in SKILLS.glob("*/SKILL.md"))
+
+
+def chatgpt_skill_dirs() -> list[Path]:
+    return [d for d in skill_dirs() if d.name not in CHATGPT_EXCLUDED_SKILLS]
 
 
 def sync_claude_skills(errors: list[str], write: bool) -> None:
@@ -210,7 +218,7 @@ def build_chatgpt_zip(manifest: dict) -> Path:
         for path in sorted(CHATGPT.rglob("*")):
             if path.is_file():
                 zf.write(path, path.relative_to(CHATGPT).as_posix())
-        for d in skill_dirs():
+        for d in chatgpt_skill_dirs():
             for path in sorted(d.rglob("*")):
                 if path.is_file():
                     zf.write(path, (Path("skills") / path.relative_to(SKILLS)).as_posix())

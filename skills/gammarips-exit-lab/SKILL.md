@@ -53,9 +53,8 @@ Then give these caveats:
 - **Excluded rows.** Rows with no label (illiquid at the entry anchor) are
   excluded, and that group is not random. Quote the exclusion counts from the
   response `meta`.
-- **History is not a forecast.** The whole pool under any one fixed exit has a
-  negative historical average. A rule that scores better on history is a
-  research result, not an expected return.
+- **History is not a promise.** A score on history is a research result for
+  that rule on past contracts, not an expected return for the next trade.
 - Paper-traded research data. Educational only. Not investment advice.
 
 For the full method, call `get_playbook(name="exit-lab")`.
