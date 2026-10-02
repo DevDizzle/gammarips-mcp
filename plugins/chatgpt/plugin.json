@@ -52,42 +52,31 @@
             {
               "description": "Reads the current nightly pool. The answer lists contracts as research data and does not choose one for the user.",
               "prompt": "What is in today's GammaRips options-flow pool? Show me the first 5 contracts.",
-              "tools_triggered": [
-                "get_market_calendar_status",
-                "get_pool"
-              ],
+              "tools_triggered": "get_market_calendar_status, get_pool",
               "expected_behavior": "ChatGPT lists 5 pool rows with ticker, contract (strike and expiration), delta, and a one-line thesis, and gives the scan date. It labels the rows as research data, not a GammaRips recommendation."
             },
             {
               "description": "Reads the market regime rail.",
               "prompt": "Does the GammaRips VIX regime rail pass right now?",
-              "tools_triggered": [
-                "get_regime_context"
-              ],
+              "tools_triggered": "get_regime_context",
               "expected_behavior": "ChatGPT gives the scan date, the VIX close, the VIX3M value, and whether the rail passes (it passes when VIX is at or below VIX3M). It notes that the regime lags the live pool by one to two trading days."
             },
             {
               "description": "Explains a data field from the field dictionary.",
               "prompt": "What does mom_60 mean in the GammaRips data, and is it safe to use for selection?",
-              "tools_triggered": [
-                "get_playbook"
-              ],
+              "tools_triggered": "get_playbook",
               "expected_behavior": "ChatGPT defines mom_60 as trailing 60-trading-day momentum of the underlying, as a fraction, guarded to dates at or before the scan date. It repeats the caveat that it is a research lever that depends on the exit horizon, not a rule."
             },
             {
               "description": "Reads the realized opportunity surface (Pro tool, the reviewer account has Pro).",
               "prompt": "Over the last 10 trading days, how far did GammaRips pool contracts move in their favor and against before they resolved?",
-              "tools_triggered": [
-                "query_outcomes"
-              ],
+              "tools_triggered": "query_outcomes",
               "expected_behavior": "ChatGPT calls query_outcomes with view=\"surface\" and reports quantiles of the maximum favorable and maximum adverse excursion (MFE and MAE) with the row count and date range. It says no exit was applied and that these are historical research numbers, not an expected return."
             },
             {
               "description": "Summarizes the daily report.",
               "prompt": "Summarize the latest GammaRips daily report in five bullet points.",
-              "tools_triggered": [
-                "get_daily_report"
-              ],
+              "tools_triggered": "get_daily_report",
               "expected_behavior": "ChatGPT gives the report title and scan date and five bullets that summarize it. It does not turn the report into a trade instruction."
             }
           ],

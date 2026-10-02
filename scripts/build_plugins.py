@@ -175,6 +175,10 @@ def check_chatgpt(errors: list[str]) -> dict:
             f"chatgpt: need 5 positive + 3 negative cases, have {len(positive)} + {len(negative)}"
         )
     for c in positive:
+        # The OpenAI validator rejects a list here ("Input should be a valid string").
+        for key in ("description", "prompt", "tools_triggered", "expected_behavior"):
+            if key in c and not isinstance(c[key], str):
+                errors.append(f"chatgpt: positive case {key} must be a string")
         for key in ("description", "prompt", "tools_triggered", "expected_behavior"):
             if not c.get(key):
                 errors.append(f"chatgpt: positive case missing {key}: {c.get('prompt', '?')[:40]}")
