@@ -5,7 +5,7 @@ A reference sequence for an agent working a live trading morning (all times ET).
 ## Timeline you're operating inside
 - **~05:30** — the engine's overnight scan + enrichment lands. The pool for `scan_date = yesterday's session` becomes available.
 - **09:30** — market opens.
-- **10:00** — the engine's own reference entry anchor (its paper cohort enters here; your agent is free to differ).
+- **10:00** — the reference entry time: the opening spread blowout has passed (your agent is free to differ).
 - **15:45–16:00** — the engine's same-day reference exit window.
 
 ## The sequence

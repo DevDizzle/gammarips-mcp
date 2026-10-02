@@ -1,9 +1,9 @@
 Exit-context: MIXED — every numbered finding below states its own horizon. Items 1, 2 and 6 are to-expiry. Items 3, 4 and 5 are the 3-trading-day window from the 10:00 ET entry. Do not read a number here without its horizon.
 Cohort: all figures below were measured on the pre-2026-08-25 pool, selected on unusual activity. The funnel now selects on liquidity.
 
-# Exit Lab — Exploring the Exit Space Honestly
+# Exit Lab: Set Targets and Stops from History
 
-The most important fact in this dataset: **the same pool of contracts is negative under a fixed exit and rich in favorable excursion before resolution.** Average same-day bracket outcome is negative; average max-favorable excursion (MFE) over 3 trading days is strongly positive. The gap between those two numbers *is* the product — and it's closed (or not) by exit discipline.
+Pool contracts move a lot before they resolve. Over the 3 trading days after the 10:00 ET entry, the median contract's premium peaked at **+21%**, about 1 in 3 touched **+50%**, and about 1 in 7 touched **+100%** (N=2,029, finding 3 below). The exit decides how much of that move you keep. This lab gives your agent the history to set the target and the stop on purpose, instead of a guess.
 
 ## What the surface actually says — measured, 2026-07-06
 
@@ -79,5 +79,5 @@ For an arbitrary (target, stop), each contract is classified TARGET / STOP / TIM
 4. Distrust anything that only works in one 2-week window. The pool is ~50 rows/day and regime-sensitive; demand stability across sub-periods before believing an edge.
 5. Remember what's excluded: ~28% of pool rows have no label (illiquid at the entry anchor) and that tail is non-random. Exclusion counts are in every response's `meta` — quote them alongside any conclusion.
 
-## What we'd tell a friend
-Selection gets you a lottery ticket with better-than-lottery odds; the exit decides whether you ever cash one. Fixed "set and forget" brackets underperform what the excursion structure makes available — that's precisely why this server sells the surface and leaves the exit to you.
+## The short version
+The pool gives you liquid contracts that move. The surface shows how far they moved and when. Set the target and the stop from that history, score the pair with `query_outcomes(view="exit_rule")`, and let the exit do the work.

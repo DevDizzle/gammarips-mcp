@@ -1,6 +1,6 @@
 # Run Your Own Tournament — the Selection Pattern
 
-The engine's own daily selection uses a **randomized bracket tournament**: no scoring rubric, no weights, no memory — just repeated small-batch head-to-head comparisons by an LLM judge, with randomization and consensus to wash out ordering artifacts. This playbook is that pattern, written so YOUR agent can run it with its own model and its own priorities.
+A strong way for your own model to choose from the pool is a **randomized bracket tournament**: no scoring rubric, no weights, no memory — just repeated small-batch head-to-head comparisons by an LLM judge, with randomization and consensus to wash out ordering artifacts. This playbook is that pattern, written so YOUR agent can run it with its own model and its own priorities.
 
 Why a tournament instead of "score every candidate 1-10"? Absolute scores from an LLM are poorly calibrated and drift with context; *relative* judgments inside a small batch are far more stable. The bracket structure turns ~50 candidates into a sequence of small, answerable questions.
 
