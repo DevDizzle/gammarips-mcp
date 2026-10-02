@@ -350,13 +350,13 @@ async def server_card(request: Request):
                 "displayName": "GammaRips Options Intelligence",
                 "version": SERVER_VERSION,
                 "description": (
-                    "Options-flow intelligence primitives for AI agents: a hard-"
-                    "curated overnight candidate pool, point-in-time features, "
-                    "realized opportunity surfaces (MFE/MAE excursions), bracket "
-                    "outcome labels, and methodology playbooks. Your agent reasons "
-                    "to its own contract and exit — there is no pick endpoint. "
-                    "Paper-traded research data; educational only; not investment "
-                    "advice."
+                    "Better-quality option contracts every trading night, and the "
+                    "history to plan the exit, for AI agents: a liquidity-ranked "
+                    "bullish pool, point-in-time features, the exit lab "
+                    "(opportunity surfaces, touch probabilities, bracket scoring), "
+                    "contract replay, and methodology playbooks. Your agent builds "
+                    "the trade plan with you. There is no pick endpoint. "
+                    "Educational only. Not investment advice."
                 ),
                 "homepage": "https://gammarips.com/developers",
                 "icon": "https://gammarips.com/logo.png",

@@ -10,7 +10,7 @@ trading night, plus the history to plan the exit. Each night the engine ranks
 about 3,500 optionable US stocks, keeps the 100 most liquid, keeps the bullish
 names, and selects one out-of-the-money call in each **on contract
 liquidity**. The pool holds roughly 40 to 50 contracts with deep books: median
-open interest 4,664 and median session volume 1,039, against 893 and 233
+open interest 4,664 and median session volume 1,039, against 906 and 232
 before the liquidity rule. In a 60-day study, no-fill at the 10:00 ET entry
 fell from 40.5% to 6.1%.
 

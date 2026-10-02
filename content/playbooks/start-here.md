@@ -2,8 +2,8 @@
 
 GammaRips gives your agent a ready, high-quality options universe every trading night, plus the history to plan the exit. Each night the engine ranks about 3,500 optionable US stocks, keeps the 100 most liquid, keeps the bullish names, and selects one out-of-the-money call in each **on contract liquidity**. The result is a pool of roughly 40 to 50 contracts with deep books:
 
-- Median open interest **4,664** contracts and median session volume **1,039**, against 893 and 233 before the liquidity rule (pool contracts since 2026-08-24).
-- The thinnest 10% of the pool still carries 1,635 open interest, against 86 before.
+- Median open interest **4,664** contracts and median session volume **1,039**, against 906 and 232 in the 60 scan days before the liquidity rule (pool contracts since 2026-08-24).
+- The thinnest 10% of the pool still carries 1,635 open interest, against 29 before.
 - In a 60-day study, no-fill at the 10:00 ET entry fell from **40.5% to 6.1%** when the engine moved to this rule.
 
 Liquid contracts are the ones you can enter and exit near the quote. A thin contract costs you on the way in and again on the way out.

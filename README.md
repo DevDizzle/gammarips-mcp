@@ -6,7 +6,7 @@ Options-flow intelligence **primitives** for AI agents.
 
 Every trading night GammaRips ranks 3,532 optionable US names by liquidity, takes the top 100, keeps the bullish ones, and prices one out-of-the-money call in each. That is a pool of roughly 40 to 50 contracts your agent can actually trade. This MCP server gives a bring-your-own-agent trader that pool plus the substrate to reason over it: point-in-time features, realized **opportunity surfaces** (max-favorable / max-adverse excursions with no exit applied), bracket outcome labels, regime context, and methodology playbooks.
 
-**Better-quality contracts, by the numbers.** The pool is selected on contract liquidity. Since the liquidity rule went live (2026-08-24, 1,301 contracts), median open interest is 4,664 and median session volume is 1,039, against 893 and 233 before. The thinnest 10% still carry 1,635 open interest, against 86. In a 60-day study, no-fill at the 10:00 ET entry fell from 40.5% to 6.1%. Liquid contracts are the ones you can enter and exit near the quote.
+**Better-quality contracts, by the numbers.** The pool is selected on contract liquidity. Since the liquidity rule went live (2026-08-24, 1,301 contracts), median open interest is 4,664 and median session volume is 1,039, against 906 and 232 in the 60 scan days before. The thinnest 10% still carry 1,635 open interest, against 29. In a 60-day study, no-fill at the 10:00 ET entry fell from 40.5% to 6.1%. Liquid contracts are the ones you can enter and exit near the quote.
 
 **Design principle: primitives, never a pick.** There is no "what should I buy" endpoint. Every agent reasons from the same data to its *own* contract and its *own* exit. Paper-traded research data; educational only; not investment advice.
 

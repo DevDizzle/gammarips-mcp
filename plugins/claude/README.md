@@ -8,9 +8,9 @@ liquidity, keeps the 100 most liquid, keeps the bullish names, and selects one
 out-of-the-money call in each on contract liquidity. The result is a pool of
 roughly 40 to 50 contracts with deep books:
 
-- Median open interest 4,664 and median session volume 1,039, against 893 and
-  233 before the liquidity rule (pool contracts since 2026-08-24).
-- The thinnest 10% still carry 1,635 open interest, against 86 before.
+- Median open interest 4,664 and median session volume 1,039, against 906 and
+  232 before the liquidity rule (pool contracts since 2026-08-24).
+- The thinnest 10% still carry 1,635 open interest, against 29 before.
 - In a 60-day study, no-fill at the 10:00 ET entry fell from 40.5% to 6.1%.
 
 Each contract comes with a thesis, technicals, a catalyst, and point-in-time
