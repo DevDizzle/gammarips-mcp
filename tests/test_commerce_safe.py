@@ -212,6 +212,23 @@ def test_streamable_initialize_and_playbook_by_client():
         assert msg["result"]["instructions"] == server._INSTRUCTIONS
 
 
+def test_commerce_safe_instructions_list_no_tier():
+    import server
+
+    text = server._INSTRUCTIONS_COMMERCE_SAFE
+    _assert_commerce_safe(text)
+    assert "Pro" not in text
+    assert "Every GammaRips plan" not in text
+
+
+def test_open_world_annotations():
+    import server
+
+    for name in server._TOOL_TITLES:
+        expected = name in ("get_liquidity", "replay_contract")
+        assert server._tool_annotations(name).openWorldHint is expected, name
+
+
 def test_jsonrpc_initialize_by_client():
     import server
 

@@ -88,18 +88,16 @@ _INSTRUCTIONS = (
 )
 
 # The same guidance for OpenAI clients (ChatGPT, Codex): no price, no trial,
-# no subscribe steps. Their plugin rules forbid them (see utils.clients).
+# no subscribe steps, and no tier list. Their plugin rules forbid displaying
+# plans or a freemium upsell (see utils.clients). The portal held the version
+# that listed which tools need Pro.
 _INSTRUCTIONS_COMMERCE_SAFE = (
     "GammaRips serves read-only options-flow data primitives. It never "
     "returns a pick. Your agent reasons to its own contract and exit. "
-    "First call get_playbook(name='start-here'). "
-    "Every GammaRips plan includes get_pool(view='preview'), "
-    "get_daily_report, get_playbook, get_regime_context, and "
-    "get_market_calendar_status. The full pool (enriched / raw / features "
-    "views), get_signal, get_liquidity, query_outcomes, and replay_contract "
-    "need GammaRips Pro. If a tool returns subscription_required, tell the "
-    "user that the feature is not included in their current plan. All data "
-    "is paper-traded research. Educational only. Not investment advice."
+    "First call get_playbook(name='start-here'). If a tool returns "
+    "subscription_required, tell the user that the feature is not included "
+    "in their current plan. All data is paper-traded research. Educational "
+    "only. Not investment advice."
 )
 
 
@@ -196,6 +194,13 @@ _TOOL_TITLES = {
 }
 
 
+# Tools that read ANY listed option contract upstream, not only the GammaRips
+# pool (get_liquidity live=true, replay_contract's upstream fallback). OpenAI's
+# rule: open-ended entities get openWorldHint=true, a bounded catalog false.
+# The plugin portal held both tools while they said false.
+_OPEN_WORLD_TOOLS = frozenset({"get_liquidity", "replay_contract"})
+
+
 def _tool_annotations(name: str) -> ToolAnnotations:
     """Annotations for a registered tool. See _TOOL_TITLES for the rationale."""
     return ToolAnnotations(
@@ -203,7 +208,7 @@ def _tool_annotations(name: str) -> ToolAnnotations:
         readOnlyHint=True,
         destructiveHint=False,
         idempotentHint=True,
-        openWorldHint=False,
+        openWorldHint=name in _OPEN_WORLD_TOOLS,
     )
 
 
