@@ -87,21 +87,15 @@ _INSTRUCTIONS = (
     "research. Educational only. Not investment advice."
 )
 
-# The same guidance for OpenAI clients (ChatGPT, Codex): no price, no trial,
-# no subscribe steps, and no tier list. Their plugin rules forbid displaying
-# plans or a freemium upsell (see utils.clients). The portal held the version
-# that listed which tools need Pro.
-_INSTRUCTIONS_COMMERCE_SAFE = (
-    "GammaRips serves read-only options-flow data primitives. It never "
-    "returns a pick. Your agent reasons to its own contract and exit. "
-    "First call get_playbook(name='start-here'). If a tool returns "
-    "subscription_required, tell the user that the feature is not included "
-    "in their current plan. All data is paper-traded research. Educational "
-    "only. Not investment advice."
-)
+# OpenAI clients (ChatGPT, Codex) get NO server instructions. Their plugin
+# portal held every version we sent: first the tier list (a plan display),
+# then a short version with no plan detail. The plugin ZIP's skills and the
+# tool descriptions carry the same guidance, and the denial envelope tells
+# the model what to say (see utils.clients).
+_INSTRUCTIONS_COMMERCE_SAFE = None
 
 
-def _instructions_for(openai_client: bool) -> str:
+def _instructions_for(openai_client: bool) -> str | None:
     return _INSTRUCTIONS_COMMERCE_SAFE if openai_client else _INSTRUCTIONS
 
 
@@ -466,7 +460,11 @@ async def handle_jsonrpc(request: Request):
                     "protocolVersion": "2025-06-18",
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "gammarips-mcp", "version": SERVER_VERSION},
-                    "instructions": _instructions_for(is_openai_client(request.headers)),
+                    **(
+                        {"instructions": text}
+                        if (text := _instructions_for(is_openai_client(request.headers)))
+                        else {}
+                    ),
                 },
             }
         )

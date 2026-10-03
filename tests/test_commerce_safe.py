@@ -188,8 +188,7 @@ def test_streamable_initialize_and_playbook_by_client():
 
     with _server_client() as c:
         msg, session = _initialize(c, OPENAI_UA)
-        assert msg["result"]["instructions"] == server._INSTRUCTIONS_COMMERCE_SAFE
-        _assert_commerce_safe(msg["result"]["instructions"])
+        assert "instructions" not in msg["result"]
 
         # A tool call in that session runs in the session's context: the
         # start-here playbook must come back commerce-safe.
@@ -212,13 +211,13 @@ def test_streamable_initialize_and_playbook_by_client():
         assert msg["result"]["instructions"] == server._INSTRUCTIONS
 
 
-def test_commerce_safe_instructions_list_no_tier():
+def test_openai_clients_get_no_instructions():
     import server
 
-    text = server._INSTRUCTIONS_COMMERCE_SAFE
-    _assert_commerce_safe(text)
-    assert "Pro" not in text
-    assert "Every GammaRips plan" not in text
+    # The portal held every instructions text, so OpenAI clients get none.
+    assert server._INSTRUCTIONS_COMMERCE_SAFE is None
+    assert server._instructions_for(True) is None
+    assert server._instructions_for(False) == server._INSTRUCTIONS
 
 
 def test_open_world_annotations():
@@ -234,7 +233,7 @@ def test_jsonrpc_initialize_by_client():
 
     c = _server_client()
     safe = c.post("/jsonrpc", json=_rpc("initialize", {}), headers=OPENAI_UA).json()
-    assert safe["result"]["instructions"] == server._INSTRUCTIONS_COMMERCE_SAFE
+    assert "instructions" not in safe["result"]
     full = c.post("/jsonrpc", json=_rpc("initialize", {}), headers=OTHER_UA).json()
     assert full["result"]["instructions"] == server._INSTRUCTIONS
 
