@@ -45,6 +45,7 @@
         "logo": "./assets/logo.png"
       },
       "review": {
+        "demo_recording_url": "https://storage.googleapis.com/gammarips-public-media/plugin-review/gammarips-codex-demo.mp4",
         "commerce": false,
         "commerce_description": "GammaRips sells nothing inside ChatGPT. A user signs in with an existing GammaRips account through OAuth. When a tool is not in the user's plan, the plugin says so and links an informational plans page. It shows no prices or trial offers and starts no purchase.",
         "test_cases": {

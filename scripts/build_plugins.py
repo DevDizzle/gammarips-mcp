@@ -168,6 +168,10 @@ def check_chatgpt(errors: list[str]) -> dict:
         if not path.startswith("./") or not (CHATGPT / path).is_file():
             errors.append(f"chatgpt: interface.{field} must be a ./ path to a package file")
 
+    # The OpenAI upload rejects a package with no video walkthrough URL.
+    if not str(openai.get("review", {}).get("demo_recording_url", "")).startswith("https://"):
+        errors.append("chatgpt: review.demo_recording_url must be an https video URL")
+
     cases = openai.get("review", {}).get("test_cases", {})
     positive, negative = cases.get("positive", []), cases.get("negative", [])
     if len(positive) < 5 or len(negative) < 3:
