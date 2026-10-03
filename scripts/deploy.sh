@@ -15,6 +15,9 @@
 #     MUST stay true: --set-env-vars REPLACES the env set, so a deploy with
 #     the old false value silently rolls enforcement back off. To roll back
 #     deliberately, set REQUIRE_API_KEY=false.
+#   * OPENAI_APPS_CHALLENGE (2026-10-03): the OpenAI plugin-portal domain token,
+#     served as plain text at /.well-known/openai-apps-challenge. It is public,
+#     not a secret. Without it the route 404s and domain verification fails.
 #   * BIGQUERY_DATASET / GCS_BUCKET_NAME / *_TABLE values are CODE DEFAULTS, not
 #     env vars on the live service — intentionally not set here.
 #   * OAUTH_ENABLED=true (2026-08-19): OAuth 2.1 resource server + /pro endpoint
@@ -63,7 +66,7 @@ gcloud run deploy "$SERVICE_NAME" \
     --concurrency=80 \
     --timeout=300 \
     --max-instances=10 \
-    --set-env-vars="REQUIRE_API_KEY=true,AUTH_SHADOW=true,OAUTH_ENABLED=true" \
+    --set-env-vars="REQUIRE_API_KEY=true,AUTH_SHADOW=true,OAUTH_ENABLED=true,OPENAI_APPS_CHALLENGE=tUczgvh2cAivkcpIMvCbb2QT0h43fovu-ZjLKJnllzo" \
     --set-secrets="POLYGON_API_KEY=POLYGON_API_KEY:latest,FMP_API_KEY=FMP_API_KEY:latest"
 
 echo ""
