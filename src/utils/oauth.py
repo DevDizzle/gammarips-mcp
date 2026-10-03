@@ -10,6 +10,8 @@ OAuth 2.1 RESOURCE-SERVER side for the GammaRips MCP (MCP authorization spec
     which is what makes a chat client (ChatGPT, claude.ai, Cursor) start the
     OAuth flow. With a valid credential the request is the same Streamable HTTP
     transport as `/mcp` (the path is rewritten in-process).
+  * `/openai` (2026-10-03) is `/pro` under its own URL for the ChatGPT/Codex
+    plugin, always commerce-safe (utils.clients). Its resource is base/openai.
   * `/mcp` stays anonymous: the free funnel never regresses. A JWT sent to
     `/mcp` is honored exactly like an API key.
   * Tier comes from the token's `tier` claim (stamped by the AS from the live
@@ -41,12 +43,18 @@ from starlette.datastructures import Headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from utils.clients import OPENAI_PATH
+
 logger = logging.getLogger(__name__)
 
 PRO_PATH = "/pro"
 MCP_PATH = "/mcp"
+# Auth-required endpoints. /openai is /pro for the ChatGPT/Codex plugin: it has
+# its own URL (the plugin portal wants one URL per app) and is always
+# commerce-safe (utils.clients).
+GATED_PATHS = (PRO_PATH, OPENAI_PATH)
 SCOPE = "mcp:read"
-RESOURCE_PATHS = ("", "/pro", "/mcp")
+RESOURCE_PATHS = ("", "/pro", "/mcp", OPENAI_PATH)
 ALGORITHMS = ("RS256",)
 _LEEWAY_SECONDS = 60
 _JWKS_TIMEOUT = 3.0
@@ -241,10 +249,10 @@ def protected_resource_metadata_doc(base: str, path: str) -> dict:
     }
 
 
-def www_authenticate(base: str, token_present: bool) -> str:
+def www_authenticate(base: str, token_present: bool, path: str = PRO_PATH) -> str:
     parts = [
         'Bearer realm="gammarips-mcp"',
-        f'resource_metadata="{base}/.well-known/oauth-protected-resource{PRO_PATH}"',
+        f'resource_metadata="{base}/.well-known/oauth-protected-resource{path}"',
         f'scope="{SCOPE}"',
     ]
     if token_present:
@@ -332,7 +340,7 @@ async def authorization_server_metadata(request: Request) -> Response:
 
 
 class ProEndpointMiddleware:
-    """Pure ASGI. For `/pro`: require a verified credential (API key or JWT of
+    """Pure ASGI. For `/pro` and `/openai`: require a verified credential (API key or JWT of
     ANY tier — the tool-level gate still decides pro vs anon), else 401 with
     the discovery challenge. On success rewrite the path to `/mcp` so the one
     Streamable HTTP transport serves both endpoints, and stash the identity so
@@ -344,8 +352,8 @@ class ProEndpointMiddleware:
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http" or not oauth_enabled():
             return await self.app(scope, receive, send)
-        path = scope.get("path", "")
-        if path.rstrip("/") != PRO_PATH:
+        path = scope.get("path", "").rstrip("/")
+        if path not in GATED_PATHS:
             return await self.app(scope, receive, send)
 
         # Late import: utils.auth imports this module.
@@ -366,14 +374,14 @@ class ProEndpointMiddleware:
                     "a machine-client token as 'Authorization: Bearer ...'. "
                     "Free, anonymous access is at /mcp."
                 ),
-                "resource_metadata": f"{base}/.well-known/oauth-protected-resource{PRO_PATH}",
+                "resource_metadata": f"{base}/.well-known/oauth-protected-resource{path}",
                 "developers_url": "https://gammarips.com/developers",
             }
             resp = JSONResponse(
                 body,
                 status_code=401,
                 headers={
-                    "WWW-Authenticate": www_authenticate(base, token_present),
+                    "WWW-Authenticate": www_authenticate(base, token_present, path),
                     "Cache-Control": "no-store",
                 },
             )
@@ -382,5 +390,5 @@ class ProEndpointMiddleware:
         scope["path"] = MCP_PATH
         scope["raw_path"] = MCP_PATH.encode()
         scope[SCOPE_IDENTITY_KEY] = identity
-        scope[SCOPE_ENDPOINT_KEY] = "pro"
+        scope[SCOPE_ENDPOINT_KEY] = path.lstrip("/")
         return await self.app(scope, receive, send)

@@ -197,6 +197,10 @@ def check_chatgpt(errors: list[str]) -> dict:
     for name, server in servers.items():
         if not server.get("url", "").startswith("https://"):
             errors.append(f"chatgpt: mcp server {name} must use an HTTPS url")
+        # /openai is the commerce-safe endpoint for every caller, including the
+        # portal scanner (it does not send the openai-mcp user agent).
+        if not server.get("url", "").rstrip("/").endswith("/openai"):
+            errors.append(f"chatgpt: mcp server {name} must use the /openai endpoint")
 
     # The commerce declaration may name what the plugin does NOT do.
     text = json.dumps(manifest).replace(

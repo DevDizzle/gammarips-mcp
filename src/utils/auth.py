@@ -39,7 +39,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from utils.clients import PLANS_URL_COMMERCE_SAFE, is_openai_client
+from utils.clients import PLANS_URL_COMMERCE_SAFE, commerce_safe
 from utils.oauth import (
     SCOPE_ENDPOINT_KEY,
     SCOPE_IDENTITY_KEY,
@@ -527,7 +527,7 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
 
         if denied_tool is not None and mode == MODE_ENFORCE:
             # Single call: echo its id. Batch: id of the first denied element.
-            error = denied_error(denied_tool, commerce_safe=is_openai_client(request.headers))
+            error = denied_error(denied_tool, commerce_safe=commerce_safe())
             return JSONResponse(
                 status_code=200,
                 content={"jsonrpc": "2.0", "id": denied_id, "error": error},

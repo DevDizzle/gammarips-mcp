@@ -26,7 +26,7 @@ from starlette.responses import JSONResponse  # noqa: E402
 from starlette.routing import Route  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
-from utils import auth, oauth  # noqa: E402
+from utils import auth, clients, oauth  # noqa: E402
 
 ISSUER = "https://gammarips.com"
 AUD = "https://mcp.gammarips.com/pro"
@@ -105,7 +105,7 @@ def _reset(env: dict | None = None):
 
 
 # --- stub app: /mcp echoes; middleware stack mirrors server.py order -------
-def _make_client():
+def _make_client(client_context: bool = False):
     async def mcp(request: Request):
         body = await request.json()
         ident = getattr(request.state, "identity", None)
@@ -136,6 +136,9 @@ def _make_client():
     # add_middleware is LIFO: AccessGate inner, ProEndpoint outer — same as server.py.
     app.add_middleware(auth.AccessGateMiddleware)
     app.add_middleware(oauth.ProEndpointMiddleware)
+    if client_context:
+        # Outermost, as in server.py: sets the commerce-safe flag per request.
+        app.add_middleware(clients.ClientContextMiddleware)
     return TestClient(app)
 
 
@@ -314,5 +317,42 @@ def test_oauth_pro():
     print("test_oauth_pro: OK")
 
 
+def test_openai_endpoint():
+    """/openai = /pro under its own URL for the ChatGPT/Codex plugin. It is
+    commerce-safe for every caller: the plugin-portal scanner does not send the
+    openai-mcp user agent."""
+    auth._lookup_key = _fake_lookup  # noqa: SLF001
+    _reset()
+    os.environ["REQUIRE_API_KEY"] = "true"
+    auth.clear_cache()
+    try:
+        c = _make_client(client_context=True)
+        r = _call(c, "/openai", "get_pool")
+        assert r.status_code == 401, r.text
+        meta = "http://testserver/.well-known/oauth-protected-resource/openai"
+        assert f'resource_metadata="{meta}"' in r.headers["www-authenticate"]
+        assert r.json()["resource_metadata"] == meta
+        r = c.get("/.well-known/oauth-protected-resource/openai")
+        assert r.status_code == 200 and r.json()["resource"] == "http://testserver/openai"
+
+        r = _call(c, "/openai", "get_signal", token=mint(aud="https://mcp.gammarips.com/openai"))
+        assert r.status_code == 200, r.text
+        res = r.json()["result"]
+        assert (res["path"], res["endpoint"], res["tier"]) == ("/mcp", "openai", "pro")
+
+        # Free token, no OpenAI user agent: the denial on /openai has no offer ...
+        err = _call(c, "/openai", "get_signal", token=mint(tier="free")).json()["error"]
+        assert err["data"]["plans_url"] == clients.PLANS_URL_COMMERCE_SAFE
+        assert auth.PRICE not in err["message"] and auth.TRIAL not in err["message"]
+        # ... and /pro keeps the full offer for the same caller.
+        err = _call(c, "/pro", "get_signal", token=mint(tier="free")).json()["error"]
+        assert auth.PRICE in err["message"]
+    finally:
+        os.environ.pop("REQUIRE_API_KEY", None)
+        _reset()
+    print("test_openai_endpoint: OK")
+
+
 if __name__ == "__main__":
     test_oauth_pro()
+    test_openai_endpoint()

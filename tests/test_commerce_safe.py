@@ -67,6 +67,20 @@ def test_detects_openai_user_agent_only():
     assert not clients.is_openai_client({})
 
 
+def test_openai_path_is_commerce_safe_for_any_user_agent():
+    scope = {
+        "type": "http",
+        "path": "/openai",
+        "headers": [(b"user-agent", b"Python/3.14 aiohttp/3.13.5")],
+    }
+    assert clients.is_openai_request(scope)
+    assert clients.is_openai_request({**scope, "path": "/openai/"})
+    assert not clients.is_openai_request({**scope, "path": "/pro"})
+    assert clients.is_openai_request(
+        {"type": "http", "path": "/pro", "headers": [(b"user-agent", b"openai-mcp/1.0.0")]}
+    )
+
+
 # --- denial envelope ---------------------------------------------------------
 
 
@@ -90,8 +104,11 @@ def _gated_client() -> TestClient:
         body = await request.json()
         return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"), "result": {"ok": True}})
 
-    app = Starlette(routes=[Route("/rpc", rpc, methods=["POST"])])
+    app = Starlette(
+        routes=[Route("/rpc", rpc, methods=["POST"]), Route("/openai", rpc, methods=["POST"])]
+    )
     app.add_middleware(auth.AccessGateMiddleware)
+    app.add_middleware(clients.ClientContextMiddleware)  # outermost, as in server.py
     return TestClient(app)
 
 
@@ -107,6 +124,10 @@ def test_gate_picks_envelope_by_client():
         _assert_commerce_safe(json.dumps(safe))
         full = c.post("/rpc", json=call, headers=OTHER_UA).json()
         assert auth.PRICE in full["error"]["message"]
+        # The /openai path is commerce-safe whatever the user agent.
+        by_path = c.post("/openai", json=call, headers=OTHER_UA).json()
+        assert by_path["error"]["data"]["plans_url"] == clients.PLANS_URL_COMMERCE_SAFE
+        _assert_commerce_safe(json.dumps(by_path))
         # A free tool still passes for an OpenAI client.
         ok = c.post(
             "/rpc",

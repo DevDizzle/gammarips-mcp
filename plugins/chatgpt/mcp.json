@@ -3,7 +3,7 @@
   "mcpServers": {
     "gammarips": {
       "type": "streamable-http",
-      "url": "https://mcp.gammarips.com/pro"
+      "url": "https://mcp.gammarips.com/openai"
     }
   }
 }
