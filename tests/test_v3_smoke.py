@@ -325,9 +325,18 @@ def run_all() -> list[tuple[str, str]]:
             else f"({r.get('ticker')})"
         ),
     )
-    check(
-        "get_pool[preview]", lambda: get_pool(view="preview", limit=3), lambda r: f"({len(r)} rows)"
-    )
+
+    def _verify_preview(rows):
+        if not rows or len(rows) > 3:
+            _fail("get_pool[preview]", f"expected 1..3 rows, got {len(rows) if rows else 0}")
+        r0 = rows[0]
+        if r0.get("gated") is not True or not r0.get("total_pool_contracts"):
+            _fail("get_pool[preview]", f"missing gated/total_pool_contracts in preview row: {r0}")
+        if "gammarips.com/pricing" not in str(r0.get("pricing_url", "")):
+            _fail("get_pool[preview]", f"missing pricing_url in preview row: {r0}")
+        return f"({len(rows)} sample rows of {r0['total_pool_contracts']} total, gated=True)"
+
+    check("get_pool[preview]", lambda: get_pool(view="preview"), _verify_preview)
 
     # --- substrate ------------------------------------------------------
     def _verify_features(out):
@@ -856,7 +865,7 @@ def run_all() -> list[tuple[str, str]]:
             f"({r['bar_count']} bars from {r['retrieved_from']}, first_crossing={fc.get('first')})"
         )
 
-    check("replay_contract[minute]", _replay_check, _verify_replay)
+    check("replay_contract[minute]", _replay_check, _verify_replay, credential_optional=True)
     check(
         "replay_contract[minute,bad-date]",
         lambda: replay_contract("O:AAPL260717C00315000", date="2026-02-30"),

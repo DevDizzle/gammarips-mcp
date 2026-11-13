@@ -67,7 +67,7 @@ is reused verbatim). Columns list the V4 tool + `view`/`granularity` mode.
 | `get_pool` (`view="enriched"`) | 1–50 | n/a |
 | `get_pool` (`view="raw"`) | 1–50 | n/a |
 | `get_pool` (`view="features"`) | 1–100 | n/a |
-| `get_pool` (`view="preview"`) | 1–20 | n/a |
+| `get_pool` (`view="preview"`) | 1–3 | n/a |
 | `get_signal` (`view="detail"`) | n/a (single row) | n/a |
 | `get_signal` (`view="earnings"`) | n/a (single ticker/contract) | 20/min + 150/day budget |
 | `get_liquidity` (single contract) | n/a (strict OCC regex) | 30/min global bucket |
@@ -199,14 +199,14 @@ Bearer-token auth + tool tiering (`src/utils/auth.py`, `AccessGateMiddleware`):
   `{uid, tier, status}`. Plaintext keys are never stored (the doc id is the
   hash). **The MCP only READS this collection** — the webapp owns key issuance
   and Stripe status sync, so the read-only trust model is intact.
-- **Tiers (V4, 5 free / 4 pro):** the `anon` free funnel set — `get_pool`,
+- **Tiers (V4, 5 free / 4 pro):** the `anon` free funnel set — `get_pool(view="preview")` (3-contract sample),
   `get_regime_context`, `get_market_calendar_status`, `get_playbook`,
-  `get_daily_report` — is usable without a key; the 4 pro tools (`get_signal`,
+  `get_daily_report` — is usable without a key; the full curated pool (`get_pool`
+  with `view="enriched"`, `"raw"`, or `"features"`) and the 4 pro tools (`get_signal`,
   `get_liquidity`, `query_outcomes`, `replay_contract`) require an active key.
   Tier is on every tool in the server card. The anon set is env-overridable
-  (`ANON_TOOLS`). NOTE: `get_pool` is anon and serves all four views
-  (enriched/raw/features/preview) — per-view tiering (free preview vs pro full)
-  is not enforced by the per-tool gate.
+  (`ANON_TOOLS`). Per-view tiering on `get_pool` (`view="preview"` free vs
+  `enriched`/`raw`/`features` pro) is enforced in `utils.auth.tool_allowed`.
 - **Resolution is fail-closed on privilege, fail-open on availability:** an
   unknown, malformed, revoked, or unverifiable key resolves to `anon` (never
   pro), and a Firestore blip degrades to `anon` rather than 500-ing — a

@@ -12,7 +12,7 @@ changes; those live in the implementations this module calls.
 The frozen 9-tool map (names are contract-frozen — downstream repos rename
 against them):
 
-  get_pool                 free   pool: enriched | raw | features | preview
+  get_pool                 free/pro pool: preview (free 3-contract sample) | enriched, raw, features (pro)
   get_signal               pro    single ticker: detail | earnings
   get_liquidity            pro    fresh liquidity: one contract | whole pool
   query_outcomes           pro    outcomes/receipts substrate (view= modes)
@@ -91,7 +91,7 @@ def _label_retired_cohort(result: Any) -> Any:
 
 
 # ===========================================================================
-# 1. get_pool  (free)  — the candidate pool, four views
+# 1. get_pool  (free preview / pro full)  — the candidate pool, four views
 # ===========================================================================
 def get_pool(
     view: str = "enriched",
@@ -130,14 +130,16 @@ def get_pool(
         metadata only; no outcome/label/telemetry column can appear). The
         quantitative substrate for joining against query_outcomes. Lags the
         live pool by ~1-2 trading days.
-      * view="preview" — a minimal public teaser (ticker, direction, score,
-        headline, directional UOA) for the most recent scan; no contract
-        specifics or thesis.
+      * view="preview" — a 3-contract public sample teaser for the most recent
+        scan (3 sample contracts, total pool count that passed today's filter,
+        `gated=True`, and an `upgrade_notice` with a link to
+        https://gammarips.com/pricing).
 
-    TIER: view="preview" is FREE (no key). The enriched / raw / features views
-    are the paid product — they require an active pro subscription key; an anon
-    call to them returns `subscription_required` (get_pool(view='preview') is
-    named as the free entry point).
+    TIER: view="preview" is FREE (no key, 3-contract sample). The enriched /
+    raw / features views are the paid product — they require an active Pro
+    subscription ($29/mo); an anon/free call to them returns
+    `subscription_required` (get_pool(view='preview') is named as the free
+    entry point).
 
     Liquidity caveat (all views): `recommended_oi`/`recommended_volume` are
     scan-time snapshots, not live values; `recommended_spread_pct` is
@@ -149,7 +151,7 @@ def get_pool(
         direction: "bull"/"bear" prefix filter (enriched / raw).
         ticker: exact ticker filter (enriched / raw / features).
         min_score: overnight_score floor (raw view only; clamped 0-10).
-        limit: max rows (enriched/raw clamp 1-50, features 1-100, preview 1-20).
+        limit: max rows (enriched/raw clamp 1-50, features 1-100, preview 1-3).
         summary: enriched only — True=compact columns, False=full rows.
         fields: enriched only — explicit strict column projection.
         offset: enriched only — pagination offset.

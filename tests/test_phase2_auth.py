@@ -148,12 +148,18 @@ def run_all():
             "tier_anon_pool_raw_denied",
             not auth.tool_allowed("get_pool", "anon", {"view": "raw"}),
         )
+        check(
+            "tier_anon_pool_features_denied",
+            not auth.tool_allowed("get_pool", "anon", {"view": "features"}),
+        )
         # missing view defaults to the paid ("enriched") view -> anon denied
         check("tier_anon_pool_default_denied", not auth.tool_allowed("get_pool", "anon"))
         check("tier_anon_denied_outcomes", not auth.tool_allowed("query_outcomes", "anon"))
         check("tier_anon_denied_liquidity", not auth.tool_allowed("get_liquidity", "anon"))
         check("tier_pro_everything", auth.tool_allowed("query_outcomes", "pro"))
         check("tier_pro_pool_full", auth.tool_allowed("get_pool", "pro", {"view": "enriched"}))
+        check("tier_pro_pool_raw", auth.tool_allowed("get_pool", "pro", {"view": "raw"}))
+        check("tier_pro_pool_features", auth.tool_allowed("get_pool", "pro", {"view": "features"}))
 
         # --- integration: OFF mode = passthrough ---
         _reset()
@@ -174,17 +180,27 @@ def run_all():
         # get_pool free-preview view: anon, no key -> allowed
         anon_preview = _call(client, "get_pool", arguments={"view": "preview"})
         check("enforce_anon_pool_preview_ok", anon_preview.get("result") is not None)
-        # get_pool full pool (default enriched view): anon, no key -> DENIED
-        # (the paid product must not leak to the free funnel)
+        # get_pool full pool (default enriched view + explicit enriched/raw/features):
+        # anon, no key -> DENIED (the paid dataset must not leak to the free funnel)
         anon_full = _call(client, "get_pool")
         check(
             "enforce_anon_pool_full_denied",
-            anon_full.get("error", {}).get("data", {}).get("code") == "subscription_required",
+            anon_full.get("error", {}).get("data", {}).get("code") == "subscription_required"
+            and "get_pool(view='preview')" in anon_full.get("error", {}).get("message", "")
+            and "https://gammarips.com/pricing" in anon_full.get("error", {}).get("message", ""),
             f"({anon_full.get('error', {}).get('code')})",
         )
-        # pro key -> full pool allowed
-        pro_full = _call(client, "get_pool", key=PRO_KEY, arguments={"view": "enriched"})
-        check("enforce_pro_pool_full_ok", pro_full.get("result") is not None)
+        for paid_view in ("enriched", "raw", "features"):
+            resp = _call(client, "get_pool", arguments={"view": paid_view})
+            check(
+                f"enforce_anon_pool_{paid_view}_denied",
+                resp.get("error", {}).get("data", {}).get("code") == "subscription_required",
+                f"({resp.get('error', {}).get('code')})",
+            )
+        # pro key -> full pool allowed across all paid views
+        for paid_view in ("enriched", "raw", "features"):
+            pro_resp = _call(client, "get_pool", key=PRO_KEY, arguments={"view": paid_view})
+            check(f"enforce_pro_pool_{paid_view}_ok", pro_resp.get("result") is not None)
         denied = _call(client, "query_outcomes")
         check(
             "enforce_pro_tool_no_key_denied",
@@ -237,6 +253,86 @@ def test_phase2_auth():
     results = run_all()
     failures = [f"{n}: {s}" for n, s in results if s.startswith("FAIL")]
     assert not failures, "\n".join(failures)
+
+
+def test_pool_preview_sample_and_gating_fields():
+    from datetime import date
+
+    from tools import overnight_signals, v4
+    from utils import clients
+
+    sample_rows = [
+        {
+            "ticker": f"T{i}",
+            "direction": "BULLISH",
+            "overnight_score": 10 - i,
+            "recommended_contract": f"O:T{i}261120C00100000",
+            "recommended_strike": 100.0 + i,
+            "recommended_expiration": date(2026, 11, 20),
+            "recommended_dte": 14,
+            "recommended_delta": 0.35,
+            "recommended_mid_price": 2.50,
+            "recommended_oi": 2500,
+            "recommended_volume": 800,
+            "call_dollar_volume": 1_500_000.0,
+            "put_dollar_volume": 200_000.0,
+            "key_headline": f"Headline {i}",
+            "scan_date": date(2026, 11, 12),
+            "total_pool_contracts": 47,
+        }
+        for i in range(10)
+    ]
+
+    class _FakeJob:
+        def __init__(self, lim: int):
+            self.lim = lim
+
+        def result(self):
+            return sample_rows[: self.lim]
+
+    class _FakeBQ:
+        def __init__(self):
+            self.last_limit = None
+            self.last_sql = None
+
+        def query(self, sql, job_config=None):
+            self.last_sql = sql
+            params = {p.name: p.value for p in (job_config.query_parameters if job_config else [])}
+            self.last_limit = params["limit"]
+            return _FakeJob(self.last_limit)
+
+    orig_client = overnight_signals.client
+    fake_bq = _FakeBQ()
+    overnight_signals.client = fake_bq
+    try:
+        # Calling get_pool(view="preview") with default limit=25 or explicit limit=20
+        # must clamp to 3 sample contracts and include total_pool_contracts + upgrade link.
+        rows = v4.get_pool(view="preview")
+        assert fake_bq.last_limit == 3
+        assert len(rows) == 3
+        for r in rows:
+            assert r["gated"] is True
+            assert r["preview_limit"] == 3
+            assert r["total_pool_contracts"] == 47
+            assert r["pricing_url"] == "https://gammarips.com/pricing"
+            assert "47" in r["upgrade_notice"]
+            assert "https://gammarips.com/pricing" in r["upgrade_notice"]
+            assert r["recommended_contract"].startswith("O:T")
+            assert r["scan_date"] == "2026-11-12"
+            assert r["recommended_expiration"] == "2026-11-20"
+
+        # Commerce-safe context (OpenAI clients) omits prices/trials.
+        tok = clients._commerce_safe.set(True)
+        try:
+            safe_rows = v4.get_pool(view="preview", limit=10)
+            assert len(safe_rows) == 3
+            assert safe_rows[0]["pricing_url"] == clients.PLANS_URL_COMMERCE_SAFE
+            assert "$29" not in safe_rows[0]["upgrade_notice"]
+            assert "subscribe" not in safe_rows[0]["upgrade_notice"].lower()
+        finally:
+            clients._commerce_safe.reset(tok)
+    finally:
+        overnight_signals.client = orig_client
 
 
 if __name__ == "__main__":
