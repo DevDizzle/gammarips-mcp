@@ -27,23 +27,27 @@ Every trading night GammaRips ranks 3,532 optionable US names by liquidity, take
   header. (2) OAuth 2.1 access token, minted by gammarips.com after you sign in
   (chat clients) or by a machine client with `client_credentials` (headless
   agents, see below). Free-tier tools work on `/mcp` with no credential at all;
-  the 4 pro tools need an active subscription on either credential. **Enforce**
-  is live. Get access at [gammarips.com/pricing](https://gammarips.com/pricing).
+  the live curated options dataset (`get_pool` with `view="enriched"`, `"raw"`,
+  or `"features"`) and the 4 pro tools need an active subscription on either
+  credential. **Enforce** is live. Get access at
+  [gammarips.com/pricing](https://gammarips.com/pricing).
 
 ## Available tools (9)
 
 V4 (2026-07-17) consolidated the 29-tool V3 surface into 9. The absorbed tools
 live on as `view=` / `granularity=` modes of these 9. `web_search` was removed.
 
-**Free tier** (no key): `get_pool`, `get_regime_context`,
+**Free tier** (no key): `get_pool(view="preview")` (3-contract sample), `get_regime_context`,
 `get_market_calendar_status`, `get_playbook`, `get_daily_report`.
-**Pro tier** (Agent Access, $29/mo key): `get_signal`, `get_liquidity`,
+**Pro tier** (Agent Access, $29/mo): live curated options dataset (`get_pool` with `view="enriched"`, `"raw"`, `"features"`), `get_signal`, `get_liquidity`,
 `query_outcomes`, `replay_contract`.
 
-- `get_pool` **(free)** — the candidate pool: `view="enriched"` (curated
-  narrative/technicals/contract/`mom_60`, leakage-safe view; default),
-  `"raw"` (pre-curation scan), `"features"` (point-in-time feature vectors
-  from the allowlist view), `"preview"` (public teaser).
+- `get_pool` **(pro for full pool; `view="preview"` free)** — the live curated
+  options dataset: `view="enriched"` (curated narrative/technicals/contract/`mom_60`,
+  leakage-safe view; default, **Pro**), `"raw"` (pre-curation scan, **Pro**),
+  `"features"` (point-in-time feature vectors from the allowlist view, **Pro**),
+  `"preview"` (**Free** 3-contract sample teaser with total pool count and
+  upgrade link to `https://gammarips.com/pricing`).
 - `get_signal` **(pro)** — one ticker: `view="detail"` (full enrichment,
   default) or `view="earnings"` (the doctrine earnings-window check).
 - `get_liquidity` **(pro)** — fresh entry-day liquidity: a single `contract`
@@ -195,7 +199,7 @@ Omit `headers` for the free tier (5 anon tools).
 
 Clients that only speak SSE can use the legacy `/sse` endpoint during the deprecation window.
 
-Free tier works with no account: `get_pool`, `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($29/mo, 30-day free trial) — generate a key at [gammarips.com](https://gammarips.com/pricing), or connect through `/pro` and sign in.
+Free tier works with no account: `get_pool(view="preview")` (3-contract sample), `get_regime_context`, `get_market_calendar_status`, `get_playbook`, `get_daily_report`. The live curated options dataset (`get_pool` with `view="enriched"`, `"raw"`, or `"features"`) and Pro tools (`get_signal`, `get_liquidity`, `query_outcomes`, `replay_contract`) require Agent Access ($29/mo, 30-day free trial) — generate a key at [gammarips.com](https://gammarips.com/pricing), or connect through `/pro` and sign in.
 
 ## Local development
 

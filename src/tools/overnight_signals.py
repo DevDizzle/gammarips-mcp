@@ -18,6 +18,7 @@ from typing import Any
 
 from google.cloud import bigquery
 
+from utils.clients import PLANS_URL_COMMERCE_SAFE, commerce_safe
 from utils.data import BQ as client
 from utils.data import RAW_SCAN_TABLE as _RAW_SCAN
 from utils.data import SAFE_ENRICHED_TABLE as _SAFE_ENRICHED
@@ -444,24 +445,25 @@ def get_signal_detail(
         return {"error": safe_error(e, "get_signal_detail")}
 
 
-def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
+def get_freemium_preview(limit: int = 3) -> list[dict[str, Any]]:
     """
-    Top N enriched signals for the most recent scan, with minimal fields. Used
-    for public/freemium teasers: ticker, direction, score, headline, directional
-    UOA dollar volume. No contract specifics or full thesis — use
-    get_signal_detail for that.
+    Top 3 sample enriched contracts for the most recent scan, with total pool
+    count and upgrade notice. Used for public/free-tier teasers so free callers
+    can test their MCP connection, inspect 3 sample contracts, see how many
+    total contracts passed today's filter, and follow the upgrade link to
+    https://gammarips.com/pricing.
 
     Args:
-        limit: How many preview rows to return (default 5, max 20).
+        limit: How many preview rows to return (default 3, max 3).
 
     Returns:
-        List of {ticker, direction, overnight_score, call_dollar_volume,
-                 put_dollar_volume, key_headline, scan_date}.
+        List of up to 3 sample contract dicts with `total_pool_contracts`,
+        `preview_limit`, `gated=True`, `pricing_url`, and `upgrade_notice`.
     """
     if not client:
         return [{"error": "BigQuery client not initialized"}]
 
-    limit = clamp(limit, 1, 20, default=5)
+    limit = clamp(limit, 1, 3, default=3)
 
     try:
         query = f"""
@@ -471,8 +473,12 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
             )
             SELECT
                 ticker, direction, overnight_score,
+                recommended_contract, recommended_strike, recommended_expiration,
+                recommended_dte, recommended_delta, recommended_mid_price,
+                recommended_oi, recommended_volume,
                 call_dollar_volume, put_dollar_volume,
-                key_headline, scan_date
+                key_headline, scan_date,
+                COUNT(*) OVER () AS total_pool_contracts
             FROM {_SAFE_ENRICHED}
             WHERE scan_date = (SELECT d FROM latest)
             ORDER BY overnight_score DESC,
@@ -488,9 +494,34 @@ def get_freemium_preview(limit: int = 5) -> list[dict[str, Any]]:
         results = []
         for row in query_job.result():
             r = dict(row)
-            if r.get("scan_date"):
-                r["scan_date"] = str(r["scan_date"])
+            for k, v in r.items():
+                if hasattr(v, "isoformat"):
+                    r[k] = v.isoformat()
+                elif hasattr(v, "strftime"):
+                    r[k] = str(v)
             results.append(r)
+
+        is_safe = commerce_safe()
+        pricing_url = PLANS_URL_COMMERCE_SAFE if is_safe else "https://gammarips.com/pricing"
+        for r in results:
+            total = int(r.get("total_pool_contracts") or len(results))
+            r["total_pool_contracts"] = total
+            r["preview_limit"] = 3
+            r["gated"] = True
+            r["pricing_url"] = pricing_url
+            if is_safe:
+                r["upgrade_notice"] = (
+                    f"Free preview: showing {len(results)} of {total} contracts that "
+                    "passed today's filter. The full curated pool (view='enriched', "
+                    "'raw', 'features') requires GammaRips Pro."
+                )
+            else:
+                r["upgrade_notice"] = (
+                    f"Free preview: showing {len(results)} of {total} contracts that "
+                    "passed today's filter. Upgrade to GammaRips Pro ($29/mo) at "
+                    "https://gammarips.com/pricing for the full curated dataset "
+                    "(view='enriched', 'raw', 'features')."
+                )
 
         return results
 
