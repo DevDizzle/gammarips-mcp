@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.DevDizzle/gammarips",
   "title": "GammaRips Options Intelligence",
-  "description": "Anti-firehose options-flow data for AI agents: curated daily pool, features, realized outcomes.",
-  "version": "4.2.0",
+  "description": "Nightly Combo A options dataset, 10-min liquidity snapshots, and 3-day excursion history for agents.",
+  "version": "4.6.0",
   "websiteUrl": "https://gammarips.com/developers",
   "repository": {
     "url": "https://github.com/DevDizzle/gammarips-mcp",
