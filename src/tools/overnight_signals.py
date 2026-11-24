@@ -22,6 +22,7 @@ from utils.clients import PLANS_URL_COMMERCE_SAFE, commerce_safe
 from utils.data import BQ as client
 from utils.data import RAW_SCAN_TABLE as _RAW_SCAN
 from utils.data import SAFE_ENRICHED_TABLE as _SAFE_ENRICHED
+from utils.instruments import build_execution_vehicles
 from utils.safety import clamp, safe_error
 
 logger = logging.getLogger(__name__)
@@ -328,6 +329,10 @@ def get_enriched_signals(
                     r[k] = v.isoformat()
                 elif hasattr(v, "strftime"):
                     r[k] = str(v)
+            if not fields and r.get("ticker"):
+                r["execution_vehicles"] = build_execution_vehicles(
+                    r.get("ticker"), r.get("recommended_contract")
+                )
 
         return _strip_dropped(results)
 
@@ -430,6 +435,11 @@ def get_signal_detail(
         for f in _DROP_FIELDS:
             result.pop(f, None)
 
+        if result.get("ticker"):
+            result["execution_vehicles"] = build_execution_vehicles(
+                result.get("ticker"), result.get("recommended_contract")
+            )
+
         # TF-10: trim the extra-long narrative by default; thesis stays.
         if not full:
             omitted = [k for k in ("news_summary", "flow_intent_reasoning") if k in result]
@@ -509,6 +519,10 @@ def get_freemium_preview(limit: int = 3) -> list[dict[str, Any]]:
             r["preview_limit"] = 3
             r["gated"] = True
             r["pricing_url"] = pricing_url
+            if r.get("ticker"):
+                r["execution_vehicles"] = build_execution_vehicles(
+                    r.get("ticker"), r.get("recommended_contract")
+                )
             if is_safe:
                 r["upgrade_notice"] = (
                     f"Free preview: showing {len(results)} of {total} contracts that "

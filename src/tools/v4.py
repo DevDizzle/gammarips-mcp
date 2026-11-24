@@ -109,7 +109,9 @@ def get_pool(
 
       * view="enriched" (DEFAULT) — the AI-enriched pool: news, technicals,
         catalyst, the recommended contract (an OTM call chosen on contract
-        liquidity), and the 60-day momentum feature `mom_60`. Funnel for
+        liquidity), `execution_vehicles` (`underlying_stock`, `option_contract`,
+        `long_2x_etfs`, `inverse_etfs` for multi-instrument equity/ETF/options
+        agents), and the 60-day momentum feature `mom_60`. Funnel for
         scan_date >= 2026-08-24 (liquid-universe era): the 100 most liquid
         optionable names, BULLISH only, one call each, roughly 40-50 rows.
         Liquidity decides membership, not unusual activity; the $500K UOA
@@ -117,10 +119,10 @@ def get_pool(
         Earlier scan dates come from the prior UOA-gated funnel (UOA>$500K,
         top-50 BULLISH); the two eras are not one population.
         This is the daily candidate set your agent reasons over to its OWN
-        contract (see get_playbook("run-your-own-tournament")). Served from a
+        vehicle/contract (see get_playbook("run-your-own-tournament")). Served from a
         leakage-safe view (forward-outcome columns physically stripped);
-        `summary=True` gives ~21 decision columns, `fields=[...]` a strict
-        projection, `summary=False` full rows, `offset` pages.
+        `summary=True` gives ~21 decision columns + `execution_vehicles`,
+        `fields=[...]` a strict projection, `summary=False` full rows, `offset` pages.
       * view="raw" — the wide overnight scan BEFORE the pool cut (the ranked
         liquid universe for scan_date >= 2026-08-24; the market-wide
         unusual-activity scan for earlier dates). Honors `direction`,
@@ -197,10 +199,12 @@ def get_signal(
     Deep dive on a single ticker/contract. Two `view`s:
 
       * view="detail" (DEFAULT) — the full enriched signal for one ticker:
-        thesis, catalyst, the recommended contract, and point-in-time
-        features (leakage-safe view). `full=true` includes the long narrative
-        (news_summary, flow_intent_reasoning). If the ticker isn't in the
-        pool for the date, the error lists the dates on which it does appear.
+        thesis, catalyst, the recommended contract, `execution_vehicles`
+        (`underlying_stock`, `option_contract`, `long_2x_etfs`, `inverse_etfs`),
+        and point-in-time features (leakage-safe view). `full=true` includes
+        the long narrative (news_summary, flow_intent_reasoning). If the ticker
+        isn't in the pool for the date, the error lists the dates on which it
+        does appear.
       * view="earnings" — the doctrine earnings-window check (RM-003): the
         next scheduled earnings date and whether it lands ON OR BEFORE the
         contract expiration (`earnings_in_window`). The engine applies this
